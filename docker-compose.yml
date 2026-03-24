@@ -1,0 +1,14 @@
+services:
+  aliaser:
+    build: .
+    ports:
+      - "8080:80"
+    volumes:
+      - aliaser-data:/var/www/html/json
+    environment:
+      # Generate a random 64-char hex key: openssl rand -hex 32
+      - ALIASER_SECRET_KEY=change_me_to_a_64_char_hex_string
+    restart: unless-stopped
+
+volumes:
+  aliaser-data:

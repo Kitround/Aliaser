@@ -1,0 +1,12 @@
+# Sensitive data — never commit
+json/credentials.json
+json/secret.key
+json/state.json
+json/notes.json
+json/addy-contacts.json
+
+# Claude Code
+.claude/
+
+# macOS
+.DS_Store
