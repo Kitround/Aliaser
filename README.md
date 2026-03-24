@@ -2,7 +2,7 @@
 
 A single-page web app for managing email aliases across multiple providers, without touching their admin interfaces.
 
-This app is 100% vibe coded using Claude Code, every steps were checked but use it with caution, only in local + VPN for outside needs.
+This app is 100% vibe coded using Claude Code so use it with caution, only in local + VPN for outside needs and give only mail access to the API generated on the different providers.
 
 ![PHP](https://img.shields.io/badge/PHP-8.2-777bb4?logo=php&logoColor=white)
 ![Vanilla JS](https://img.shields.io/badge/JS-Vanilla-f7df1e?logo=javascript&logoColor=black)
