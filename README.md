@@ -28,6 +28,14 @@ A single-page web app for managing email aliases across multiple providers, with
 - Dark theme, responsive (mobile + desktop)
 - All data stored server-side, encrypted credentials
 
+## Screenshots
+
+![aliaser-preview-1](https://github.com/user-attachments/assets/7e109b81-ac51-4f8f-902d-44e53b206ab8)
+
+![aliaser-preview-2](https://github.com/user-attachments/assets/23b7ea29-0372-4e2e-8f8f-96a5cb888db5)
+
+![aliaser-preview-3](https://github.com/user-attachments/assets/7fc968ae-909f-4e05-afc9-f26abb455783)
+
 ## Architecture
 
 No framework, no build step — vanilla JS + PHP.
