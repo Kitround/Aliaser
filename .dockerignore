@@ -1,0 +1,14 @@
+# Sensitive credentials — never bake into image layers, mount as volumes at runtime
+config.php
+json/
+
+# Browser extensions — server image only, these are not needed
+chrome/
+firefox/
+
+# Docker files and dev/meta files
+docker/
+.dockerignore
+CLAUDE.md
+README.md
+.git/

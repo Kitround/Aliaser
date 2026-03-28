@@ -1,0 +1,14 @@
+services:
+  aliaser:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:80"
+    volumes:
+      - ../json:/var/www/html/json
+    environment:
+      # Generate a key with: openssl rand -hex 32
+      # Then create docker/.env with: ALIASER_SECRET_KEY=<your_key>
+      ALIASER_SECRET_KEY: ${ALIASER_SECRET_KEY:-}
+    restart: unless-stopped

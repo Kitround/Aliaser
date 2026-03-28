@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Aliaser</title>
+<link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="images/favicon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Aliaser">
+<meta name="theme-color" content="#0f0f0f" id="theme-color-meta">
+<link rel="stylesheet" href="css/style.css">
+</head>
+</head>
+<body>
+<div class="layout">
+  <div class="main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="brand">
+          <svg class="brand-icon" viewBox="0 0 821.57 649" xmlns="http://www.w3.org/2000/svg">
+            <path fill="#6c63ff" d="M803.59,0H161.62c-9.93,0-17.98,8.05-17.98,17.98v472.04c0,9.93,8.05,17.98,17.98,17.98h641.97c9.93,0,17.98-8.05,17.98-17.98V17.98c0-9.93-8.05-17.98-17.98-17.98ZM483.5,304.84L214.63,35.96h537.74l-268.87,268.87ZM377.51,249.71l-197.91,197.91V51.8l197.91,197.91ZM402.95,275.14l67.84,67.84c3.37,3.37,7.95,5.27,12.72,5.27s9.34-1.89,12.72-5.27l66.2-66.2,195.25,195.25H206.05l196.89-196.9ZM587.84,251.36l197.76-197.76v395.52l-197.76-197.76Z"/>
+            <path fill="rgba(108,99,255,.55)" d="M610,580H91c-11.05,0-20-8.95-20-20V93c0-11.05,8.95-20,20-20s20,8.95,20,20v447h499c11.05,0,20,8.95,20,20s-8.95,20-20,20Z"/>
+            <path fill="rgba(108,99,255,.3)" d="M398.97,649H20c-11.05,0-20-8.95-20-20v-341c0-11.05,8.95-20,20-20s20,8.95,20,20v321h358.97c11.05,0,20,8.95,20,20s-8.95,20-20,20Z"/>
+          </svg>
+          <span class="brand-name">Aliaser</span>
+        </div>
+      </div>
+      <span class="topbar-count" id="topbar-alias-count"></span>
+      <div class="created-alias-pill" id="created-alias-pill">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <span id="created-alias-pill-text"></span>
+      </div>
+      <div class="search-wrap">
+        <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input class="search-input" id="search-input" type="text" placeholder="Find aliases…" autocomplete="off">
+        <button class="search-clear" id="search-clear" style="display:none" title="Clear">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="topbar-right">
+        <button class="btn btn-secondary btn-sm btn-icon" id="btn-refresh" title="Refresh">
+          <svg class="refresh-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+        </button>
+        <button class="btn btn-primary btn-sm" id="btn-add" style="display:none">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          New Alias
+        </button>
+        <button class="btn btn-secondary btn-sm btn-icon" id="btn-settings" title="Settings">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content-scroll">
+      <div class="state-view" id="state-loading"><div class="spinner"></div><div class="state-title">Loading aliases…</div></div>
+      <div class="state-view" id="state-config">
+        <div class="state-icon">⚙️</div>
+        <div class="state-title">No accounts configured</div>
+        <div class="state-sub">Open Settings to add your OVH, Infomaniak, SimpleLogin, Addy or Cloudflare accounts.</div>
+      </div>
+      <div class="state-view" id="state-empty">
+        <div class="state-icon">📭</div>
+        <div class="state-title">No aliases</div>
+        <div class="state-sub">Create your first alias to protect your email address.</div>
+      </div>
+      <div id="alias-list"></div>
+
+    </div>
+
+  </div>
+</div>
+
+<!-- Mobile bar -->
+<div class="mobile-bar">
+  <button class="bar-btn" id="mob-settings" title="Settings">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  </button>
+  <button class="bar-btn" id="mob-refresh" title="Refresh">
+    <svg class="refresh-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+    </svg>
+  </button>
+  <button class="bar-btn" id="mob-search" title="Search">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+  </button>
+  <button class="bar-btn primary" id="mob-add" style="display:none" title="New alias">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+    </svg>
+  </button>
+</div>
+
+<!-- Mobile search panel -->
+<div class="mob-search-panel" id="mob-search-bubble">
+  <div class="mob-search-bar">
+    <svg class="mob-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+    <input class="mob-search-input" id="mob-search-input" type="text" placeholder="Find aliases…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+    <button class="mob-search-cancel" id="mob-search-cancel">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- ── Settings modal ── -->
+<div class="modal-overlay" id="modal-settings">
+  <div class="modal modal-settings">
+    <div class="modal-header">
+      <div class="modal-title" id="settings-modal-title">Settings</div>
+      <button class="modal-close" id="close-settings">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+      <button class="modal-close" id="back-settings" style="display:none">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+
+      <div class="settings-section" id="section-accounts">
+        <div class="section-label" id="settings-accounts-label">Accounts</div>
+        <div class="account-list" id="account-list"></div>
+        <div class="section-label section-label-provider">Add a provider</div>
+        <div class="btn-row btn-row-wrap">
+          <button class="btn btn-secondary btn-sm" id="btn-add-ovh-account">+ OVH</button>
+          <button class="btn btn-secondary btn-sm" id="btn-add-ik-account">+ Infomaniak</button>
+          <button class="btn btn-secondary btn-sm" id="btn-add-sl-account">+ SimpleLogin</button>
+          <button class="btn btn-secondary btn-sm" id="btn-add-addy-account">+ Addy</button>
+          <button class="btn btn-secondary btn-sm" id="btn-add-cf-account">+ Cloudflare</button>
+          <button class="btn btn-secondary btn-sm" id="btn-add-haltman-account">+ Haltman</button>
+        </div>
+      </div>
+
+      <!-- Edit account form -->
+      <div class="settings-section" id="section-edit-account" style="display:none">
+        <div class="field">
+          <div class="section-label">Label</div>
+          <input class="field-input" id="edit-acc-label" type="text" placeholder="Account label" autocomplete="off">
+        </div>
+        <div id="edit-acc-token-wrap">
+          <div class="field">
+            <div class="section-label">API Token</div>
+            <input class="field-input" id="edit-acc-token" type="password" placeholder="API token" autocomplete="off" autocapitalize="none">
+          </div>
+        </div>
+        <div id="edit-acc-ovh-wrap" style="display:none">
+          <div class="field">
+            <div class="section-label">OVH App Key</div>
+            <input class="field-input" id="edit-acc-ovh-key" type="password" placeholder="OVH application key" autocomplete="off" autocapitalize="none">
+          </div>
+          <div class="field">
+            <div class="section-label">OVH App Secret</div>
+            <input class="field-input" id="edit-acc-ovh-secret" type="password" placeholder="OVH application secret" autocomplete="off" autocapitalize="none">
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-edit-acc-authenticate">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            Authenticate with OVH
+          </button>
+          <div class="auth-url-box" id="edit-acc-auth-url-box"></div>
+          <div class="btn-row btn-row-wrap" id="edit-acc-auth-url-actions" style="display:none">
+            <a class="btn btn-primary btn-sm" id="edit-acc-btn-open-url" href="#" target="_blank" rel="noopener">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+              </svg>Open
+            </a>
+            <button class="btn btn-secondary btn-sm" id="edit-acc-btn-copy-url">Copy URL</button>
+          </div>
+          <div class="auth-message" id="edit-acc-auth-message">✅ After validating in your browser, come back and save.</div>
+        </div>
+        <div class="field">
+          <div class="section-label">Status</div>
+          <div class="status-badge">
+            <span class="status-dot" id="edit-acc-status-dot"></span>
+            <span id="edit-acc-status-text">–</span>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="btn-save-edit-account">Save</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-edit-account">Cancel</button>
+          <a href="#" id="edit-acc-dashboard-link" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" style="display:none">Dashboard</a>
+        </div>
+      </div>
+
+      <!-- OVH form -->
+      <div class="settings-section" id="section-add-ovh" style="display:none">
+        <div class="field">
+          <div class="section-label">App Key</div>
+          <input class="field-input" id="s-ovh-app-key" type="password" placeholder="OVH application key" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="field">
+          <div class="section-label">App Secret</div>
+          <input class="field-input" id="s-ovh-app-secret" type="password" placeholder="OVH application secret" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="field">
+          <div class="section-label">Authentication</div>
+          <div class="status-badge">
+            <span class="status-dot" id="auth-dot"></span>
+            <span id="auth-status-text">Not authenticated</span>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-authenticate">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          Authenticate with OVH
+        </button>
+        <div class="auth-url-box" id="auth-url-box"></div>
+        <div class="btn-row btn-row-wrap" id="auth-url-actions" style="display:none">
+          <a class="btn btn-primary btn-sm" id="btn-open-url" href="#" target="_blank" rel="noopener">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>Open
+          </a>
+          <button class="btn btn-secondary btn-sm" id="btn-copy-url">Copy URL</button>
+        </div>
+        <div class="auth-message" id="auth-message">✅ After validating in your browser, come back and fill the account details below.</div>
+        <div class="field">
+          <div class="section-label">Email account</div>
+          <input class="field-input" id="s-ovh-account" type="email" placeholder="you@example.com" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="btn-save-ovh-account">Save account</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-add-ovh">Cancel</button>
+        </div>
+        <div class="field-hint-text">Create your App Key and App Secret at <a href="https://eu.api.ovh.com/createApp/" target="_blank" rel="noopener" class="link-accent">eu.api.ovh.com/createApp</a>, then click Authenticate to link your OVH account.</div>
+      </div>
+
+      <!-- Infomaniak form -->
+      <div class="settings-section" id="section-add-ik" style="display:none">
+        <div class="field">
+          <div class="section-label">API Token</div>
+          <input class="field-input" id="s-ik-token" type="password" placeholder="Infomaniak API token" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="field">
+          <div class="section-label">Mail Hosting ID</div>
+          <input class="field-input" id="s-ik-hosting-id" type="text" placeholder="94410" autocomplete="off" inputmode="numeric">
+        </div>
+        <div class="field">
+          <div class="section-label">Email account</div>
+          <input class="field-input" id="s-ik-account" type="email" placeholder="you@example.com" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="btn-save-ik-account">Save account</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-add-ik">Cancel</button>
+        </div>
+        <div class="field-hint-text">Get your API token at <a href="https://manager.infomaniak.com/v3/ng/profile/api" target="_blank" rel="noopener" class="link-accent">manager.infomaniak.com → Profile → API</a> (requires Mail Hosting permissions). The Mail Hosting ID and your email address are found in the <a href="https://manager.infomaniak.com" target="_blank" rel="noopener" class="link-accent">Infomaniak Manager</a> under Mail Hosting.</div>
+      </div>
+
+      <!-- SimpleLogin form -->
+      <div class="settings-section" id="section-add-sl" style="display:none">
+        <div class="field">
+          <div class="section-label">API Token</div>
+          <input class="field-input" id="s-sl-token" type="password" placeholder="SimpleLogin API key" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="field">
+          <div class="section-label">Label</div>
+          <input class="field-input" id="s-sl-label" type="text" placeholder="My SimpleLogin" autocomplete="off">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="btn-save-sl-account">Save account</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-add-sl">Cancel</button>
+        </div>
+        <div class="field-hint-text">Get your API key at <a href="https://app.simplelogin.io/dashboard/api_key" target="_blank" rel="noopener" class="link-accent">SimpleLogin → Settings → API Keys</a>.</div>
+      </div>
+
+      <!-- Addy form -->
+      <div class="settings-section" id="section-add-addy" style="display:none">
+        <div class="field">
+          <div class="section-label">API Token</div>
+          <input class="field-input" id="s-addy-token" type="password" placeholder="Addy API key" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="field">
+          <div class="section-label">Label</div>
+          <input class="field-input" id="s-addy-label" type="text" placeholder="My Addy" autocomplete="off">
+        </div>
+        <div class="field">
+          <div class="section-label">Destination email <span class="label-optional">(optional, auto-detected if empty)</span></div>
+          <input class="field-input" id="s-addy-email" type="email" placeholder="you@example.com" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="field">
+          <div class="section-label">Domain <span class="label-optional">(optional, auto-detected if empty)</span></div>
+          <input class="field-input" id="s-addy-domain" type="text" placeholder="anonaddy.me" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="btn-save-addy-account">Save account</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-add-addy">Cancel</button>
+        </div>
+        <div class="field-hint-text">Get your API key at <a href="https://app.addy.io/settings#api-keys" target="_blank" rel="noopener" class="link-accent">Addy → Settings → API Keys</a>. Domain can be left empty to use your default Addy domain.</div>
+      </div>
+
+      <!-- Haltman form -->
+      <div class="settings-section" id="section-add-haltman" style="display:none">
+        <div class="field">
+          <div class="section-label">API Key</div>
+          <input class="field-input" id="s-haltman-token" type="password" placeholder="64-char hex key" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="field">
+          <div class="section-label">Domain</div>
+          <select class="field-input" id="s-haltman-domain"></select>
+        </div>
+        <div class="field">
+          <div class="section-label">Label <span class="label-optional">(optional, defaults to domain)</span></div>
+          <input class="field-input" id="s-haltman-label" type="text" placeholder="My Haltman" autocomplete="off">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="btn-save-haltman-account">Save account</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-add-haltman">Cancel</button>
+        </div>
+        <div class="field-hint-text">Generate your API key at <a href="https://forward.haltman.io" target="_blank" rel="noopener" class="link-accent">forward.haltman.io</a>.</div>
+      </div>
+
+      <!-- Cloudflare form -->
+      <div class="settings-section" id="section-add-cf" style="display:none">
+        <div class="field">
+          <div class="section-label">API Token</div>
+          <input class="field-input" id="s-cf-token" type="password" placeholder="Cloudflare API token" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="field">
+          <div class="section-label">Zone ID</div>
+          <input class="field-input" id="s-cf-zone-id" type="text" placeholder="abc123def456..." autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <div class="section-label">Destination email</div>
+          <input class="field-input" id="s-cf-target" type="email" placeholder="you@example.com" autocomplete="off" autocapitalize="none">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="btn-save-cf-account">Save account</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-add-cf">Cancel</button>
+        </div>
+        <div class="field-hint-text">Create an API token at <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="link-accent">Cloudflare → Profile → API Tokens</a> with Email Routing Read &amp; Edit permissions. Zone ID is found in your Cloudflare dashboard → select domain → Overview (right sidebar).</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── New Alias modal ── -->
+<div class="modal-overlay" id="modal-add">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <div class="modal-title">New Alias</div>
+      <button class="modal-close" id="close-add">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="field" id="new-alias-account-field">
+        <div class="section-label" id="new-alias-account-label">Account</div>
+        <div class="account-pills" id="new-alias-account-pills"></div>
+      </div>
+      <div class="field" id="alias-name-field">
+        <div class="section-label">Alias name <span class="label-optional">letters, numbers and _ only</span></div>
+        <div class="alias-input-row">
+          <div class="alias-name-wrap">
+            <input class="field-input" id="alias-name-input" type="text" placeholder="e.g. shopping" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+            <button class="alias-name-clear" id="btn-clear-alias-name" style="display:none" title="Clear" type="button">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="field-error" id="alias-duplicate-error" style="display:none">This alias already exists on this account.</div>
+      </div>
+      <div class="field-preview" id="alias-preview"></div>
+      <div class="field" id="alias-suggestions-wrap" style="display:none">
+        <div class="section-label">Random alias</div>
+        <div class="alias-suggestions" id="alias-suggestions"></div>
+      </div>
+      <div class="field">
+        <div class="section-label">Note <span class="label-optional">(optional)</span></div>
+        <textarea class="field-input field-textarea" id="alias-note-input" placeholder="e.g. used for Amazon" rows="2" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+      </div>
+      <button class="btn btn-primary" id="btn-create-alias" disabled>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Create &amp; copy alias
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Edit Note modal ── -->
+<div class="modal-overlay" id="modal-edit-note">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <div class="modal-title">Edit Note</div>
+      <button class="modal-close" id="close-edit-note">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="field-preview edit-note-alias-address" id="edit-note-alias-address"></div>
+      <div class="field">
+        <div class="section-label">Note <span class="label-optional">(optional)</span></div>
+        <textarea class="field-input field-textarea" id="edit-note-input" rows="3" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-save-note">Save</button>
+        <button class="btn btn-ghost" id="btn-cancel-edit-note">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── SL Contacts modal ── -->
+<div class="modal-overlay" id="modal-sl-contacts">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <div class="modal-title">Contacts</div>
+      <button class="modal-close" id="close-sl-contacts">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body contacts-modal-header">
+      <div class="field-preview contacts-alias-label" id="contacts-alias-address"></div>
+      <div class="field">
+        <div class="section-label">Add a recipient</div>
+        <input class="field-input" id="contacts-new-email" type="email" placeholder="recipient@example.com" autocomplete="off" autocapitalize="none">
+        <button class="btn btn-primary btn-sm" id="btn-create-contact">Create reverse alias</button>
+        <div class="field-error" id="contacts-error" style="display:none"></div>
+      </div>
+      <div class="section-label contacts-existing-label">Existing contacts</div>
+    </div>
+    <div class="modal-body contacts-modal-list">
+      <div id="contacts-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Confirm delete ── -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <div>
+      <div class="confirm-title">Delete alias?</div>
+      <div class="confirm-sub">This will permanently remove</div>
+      <div class="confirm-alias" id="confirm-alias-name"></div>
+    </div>
+    <div class="confirm-actions">
+      <button class="btn btn-secondary" id="confirm-cancel">Cancel</button>
+      <button class="btn btn-danger" id="confirm-delete">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="error-banner" id="error-banner">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+  </svg>
+  <span id="error-text"></span>
+</div>
+
+<div class="copy-toast-global" id="copy-toast-global">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+  <span id="copy-toast-text">Copied</span>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
