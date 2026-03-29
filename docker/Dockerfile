@@ -9,9 +9,8 @@ RUN apt-get update \
 
 RUN a2enmod rewrite
 
-# Copy application files from build context (project root)
-# Browser extensions, json/, and dev files are excluded via .dockerignore
-COPY . /var/www/html/
+# Copy application files from app/ subfolder
+COPY app/ /var/www/html/
 
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

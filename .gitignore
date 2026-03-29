@@ -1,0 +1,16 @@
+# Sensitive data
+app/json/credentials.json
+app/json/secret.key
+app/json/notes.json
+app/json/addy-contacts.json
+app/json/state.json
+
+# Local deploy script
+aliaser_docker.sh
+
+# Claude internal
+CLAUDE.md
+.claude/
+
+# OS
+.DS_Store

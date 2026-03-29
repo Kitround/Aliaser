@@ -1,13 +1,13 @@
 # Sensitive credentials — never bake into image layers, mount as volumes at runtime
 config.php
-json/
+app/json/
 
 # Browser extensions — server image only, these are not needed
-chrome/
-firefox/
+extensions/
 
-# Docker files and dev/meta files
+# Docker files and dev/meta files — keep entrypoint.sh accessible
 docker/
+!docker/entrypoint.sh
 .dockerignore
 CLAUDE.md
 README.md

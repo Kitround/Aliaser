@@ -4,9 +4,9 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     ports:
-      - "8080:80"
+      - "8090:80"
     volumes:
-      - ./json:/var/www/html/json
+      - ./app/json:/var/www/html/json
     environment:
       ALIASER_SECRET_KEY: ${ALIASER_SECRET_KEY:-}
     restart: unless-stopped
