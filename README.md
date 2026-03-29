@@ -1,74 +1,135 @@
 # Aliaser
 
-Web app for managing email aliases via OVH, Infomaniak, SimpleLogin, Addy.io, and Cloudflare.
+A single-page web app for managing email aliases across multiple providers, without touching their admin interfaces.
 
-## Project structure
+This app is 100% vibe coded using Claude Code so use it with caution, only in local + VPN for outside needs and give only mail access to the API generated on the different providers.
+
+![PHP](https://img.shields.io/badge/PHP-8.2-777bb4?logo=php&logoColor=white)
+![Vanilla JS](https://img.shields.io/badge/JS-Vanilla-f7df1e?logo=javascript&logoColor=black)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ed?logo=docker&logoColor=white)
+
+## Supported providers
+
+| Provider | List | Create | Delete | Disable | Notes | Contacts |
+|---|---|---|---|---|---|---|
+| **OVH** (Zimbra) | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **Infomaniak** | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **SimpleLogin** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Addy.io** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Cloudflare** | ✅ | ✅ | ✅ | — | ✅ | — |
+
+## Features
+
+- Manage aliases from multiple providers and accounts in one place
+- Create aliases with custom or auto-generated names
+- Add notes to aliases (synced to provider API where supported)
+- Copy alias address in one click
+- Disable/re-enable aliases without deleting them
+- Search across all aliases (address, target, note)
+- SimpleLogin & Addy.io contacts / reverse aliases management
+- Dark theme, responsive (mobile + desktop)
+- All data stored server-side, encrypted credentials
+
+## Screenshots
+
+![aliaser-preview-1](https://github.com/user-attachments/assets/7e109b81-ac51-4f8f-902d-44e53b206ab8)
+
+![aliaser-preview-2](https://github.com/user-attachments/assets/23b7ea29-0372-4e2e-8f8f-96a5cb888db5)
+
+![aliaser-preview-3](https://github.com/user-attachments/assets/7fc968ae-909f-4e05-afc9-f26abb455783)
+
+## Architecture
+
+No framework, no build step — vanilla JS + PHP.
 
 ```
-app/                — Web application (PHP + JS)
-extensions/
-  chrome/           — Chrome extension (MV3)
-  firefox/          — Firefox extension
-docker/             — Dockerfile, entrypoint
-docker-compose.yml
-aliaser_docker.sh
+index.html   — UI (single page)
+css/style.css — Styles (dark theme, responsive)
+js/app.js    — All frontend logic
+proxy.php    — PHP backend: signs OVH requests, proxies API calls, persists data
+json/        — Server-side data (auto-created, not committed)
 ```
 
-## Requirements
+Data is persisted in `json/` on the server:
+- `state.json` — accounts and settings
+- `notes.json` — alias notes
+- `credentials.json` — API tokens (AES-256-CBC encrypted)
+- `addy-contacts.json` — Addy.io contacts cache
 
-- A server with the app files
-- A separate VM running Docker and Portainer
-- SSH access from the server to the VM
+## Deployment
 
-## Installation
+### Docker (recommended)
 
-### 1. Generate a secret key
+1. Generate a secret key:
+   ```bash
+   openssl rand -hex 32
+   ```
 
-```bash
-openssl rand -hex 32
-```
+2. Edit `docker-compose.yml` and set `ALIASER_SECRET_KEY` to the generated key.
 
-Keep this value — it encrypts your credentials.
+3. Start:
+   ```bash
+   docker compose up -d
+   ```
 
-### 2. Deploy to the VM
+4. Open `http://localhost:8080` and add your accounts from Settings.
 
-```bash
-chmod +x aliaser_docker.sh
-./aliaser_docker.sh
-```
+### Manual (nginx / Apache + PHP 8.2+)
 
-This script syncs the files to the VM and builds the Docker image.
+Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
 
-### 3. Create the stack in Portainer
+1. Copy all files to your web root.
 
-In Portainer → Stacks → Add stack → Web editor:
+2. Make `json/` writable by the web server:
+   ```bash
+   mkdir -p json && chown www-data:www-data json
+   ```
 
-```yaml
-services:
-  aliaser:
-    image: aliaser:latest
-    pull_policy: never
-    ports:
-      - "8090:80"
-    volumes:
-      - ~/aliaser/app/json:/var/www/html/json
-    environment:
-      ALIASER_SECRET_KEY: "your_key_here"
-    restart: unless-stopped
-```
+3. Set the encryption key — choose one method:
 
-Replace `your_key_here` with the key generated in step 1.
+   **Environment variable** (recommended):
+   ```bash
+   # In your PHP-FPM or Apache config:
+   ALIASER_SECRET_KEY=your_64_char_hex_key
+   ```
 
-### 4. Deploy the stack
+   **File above web root** (shared hosting):
+   ```bash
+   echo "your_64_char_hex_key" > /path/above/webroot/aliaser.key
+   chmod 600 /path/above/webroot/aliaser.key
+   ```
 
-Click **Deploy the stack**. The app is available at `http://VM_IP:8090`.
+   If neither is set, a key is auto-generated and stored in `json/secret.key` (less secure — key and encrypted data in the same directory).
 
-## Updates
+4. Open the app in your browser and add your accounts from Settings.
 
-After modifying the app files, redeploy with:
+## Security
 
-```bash
-./aliaser_docker.sh
-```
+- API tokens are stored **encrypted** (AES-256-CBC) in `credentials.json` — never in plain text
+- Tokens are never written to `state.json`
+- Security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`
+- No authentication layer — intended for **private/LAN/VPN** use only
 
-Portainer will restart the container automatically with the new image.
+> ⚠️ Do not expose this app on the public internet without adding authentication (e.g. HTTP Basic Auth via nginx).
+
+## Adding accounts
+
+### OVH
+1. Create an app at [eu.api.ovh.com/createApp](https://eu.api.ovh.com/createApp/) to get an **App Key** and **App Secret**
+2. Add the account in Settings → authenticate to get a Consumer Key
+
+### Infomaniak
+1. Go to [manager.infomaniak.com/v3/profile/api](https://manager.infomaniak.com/v3/profile/api)
+2. Create a token with **Mail Hosting** read + write permissions
+
+### SimpleLogin
+1. Go to [app.simplelogin.io/dashboard/api_key](https://app.simplelogin.io/dashboard/api_key)
+2. Copy your API key
+
+### Addy.io
+1. Go to [app.addy.io/settings](https://app.addy.io/settings) → API Keys section
+2. Create an API key
+
+### Cloudflare
+1. Go to [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+2. Create a token with **Email Routing** read + edit permissions
