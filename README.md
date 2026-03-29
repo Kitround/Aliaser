@@ -43,14 +43,20 @@ This app is 100% vibe coded using Claude Code so use it with caution, only in lo
 No framework, no build step — vanilla JS + PHP.
 
 ```
-index.html   — UI (single page)
-css/style.css — Styles (dark theme, responsive)
-js/app.js    — All frontend logic
-proxy.php    — PHP backend: signs OVH requests, proxies API calls, persists data
-json/        — Server-side data (auto-created, not committed)
+app/
+  index.html        — UI (single page)
+  css/style.css     — Styles (dark theme, responsive)
+  js/app.js         — All frontend logic
+  proxy.php         — PHP backend: signs OVH requests, proxies API calls, persists data
+  json/             — Server-side data (auto-created, not committed)
+extensions/
+  chrome/           — Chrome extension (MV3)
+  firefox/          — Firefox extension
+docker/             — Dockerfile, entrypoint
+docker-compose.yml
 ```
 
-Data is persisted in `json/` on the server:
+Data is persisted in `app/json/` on the server:
 - `state.json` — accounts and settings
 - `notes.json` — alias notes
 - `credentials.json` — API tokens (AES-256-CBC encrypted)
@@ -58,48 +64,71 @@ Data is persisted in `json/` on the server:
 
 ## Deployment
 
-### Docker (recommended)
+### Docker with Portainer (recommended)
 
 1. Generate a secret key:
    ```bash
    openssl rand -hex 32
    ```
 
-2. Edit `docker-compose.yml` and set `ALIASER_SECRET_KEY` to the generated key.
-
-3. Start:
+2. Clone the repo on your Docker host:
    ```bash
-   docker compose up -d
+   git clone https://github.com/Kitround/Aliaser.git ~/aliaser
    ```
 
-4. Open `http://localhost:8080` and add your accounts from Settings.
+3. Build the image:
+   ```bash
+   docker build -f ~/aliaser/docker/Dockerfile -t aliaser:latest ~/aliaser
+   ```
+
+4. In Portainer → Stacks → Add stack → Web editor:
+   ```yaml
+   services:
+     aliaser:
+       image: aliaser:latest
+       pull_policy: never
+       ports:
+         - "8090:80"
+       volumes:
+         - ~/aliaser/app/json:/var/www/html/json
+       environment:
+         ALIASER_SECRET_KEY: "your_key_here"
+       restart: unless-stopped
+   ```
+
+5. Open `http://YOUR_HOST:8090` and add your accounts from Settings.
+
+### Docker (standalone)
+
+1. Generate a secret key:
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. Set the key and start:
+   ```bash
+   ALIASER_SECRET_KEY=your_key docker compose up -d
+   ```
+
+3. Open `http://localhost:8090` and add your accounts from Settings.
 
 ### Manual (nginx / Apache + PHP 8.2+)
 
 Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
 
-1. Copy all files to your web root.
+1. Copy the `app/` folder contents to your web root.
 
 2. Make `json/` writable by the web server:
    ```bash
    mkdir -p json && chown www-data:www-data json
    ```
 
-3. Set the encryption key — choose one method:
-
-   **Environment variable** (recommended):
+3. Set the encryption key as an environment variable in your PHP-FPM or Apache config:
    ```bash
-   # In your PHP-FPM or Apache config:
    ALIASER_SECRET_KEY=your_64_char_hex_key
    ```
 
-   **File above web root** (shared hosting):
-   ```bash
-   echo "your_64_char_hex_key" > /path/above/webroot/aliaser.key
-   chmod 600 /path/above/webroot/aliaser.key
-   ```
-
-   If neither is set, a key is auto-generated and stored in `json/secret.key` (less secure — key and encrypted data in the same directory).
+   If not set, a key is auto-generated and stored in `json/secret.key` (less secure).
 
 4. Open the app in your browser and add your accounts from Settings.
 
