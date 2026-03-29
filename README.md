@@ -141,24 +141,4 @@ Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
 
 > ⚠️ Do not expose this app on the public internet without adding authentication (e.g. HTTP Basic Auth via nginx).
 
-## Adding accounts
 
-### OVH
-1. Create an app at [eu.api.ovh.com/createApp](https://eu.api.ovh.com/createApp/) to get an **App Key** and **App Secret**
-2. Add the account in Settings → authenticate to get a Consumer Key
-
-### Infomaniak
-1. Go to [manager.infomaniak.com/v3/profile/api](https://manager.infomaniak.com/v3/profile/api)
-2. Create a token with **Mail Hosting** read + write permissions
-
-### SimpleLogin
-1. Go to [app.simplelogin.io/dashboard/api_key](https://app.simplelogin.io/dashboard/api_key)
-2. Copy your API key
-
-### Addy.io
-1. Go to [app.addy.io/settings](https://app.addy.io/settings) → API Keys section
-2. Create an API key
-
-### Cloudflare
-1. Go to [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-2. Create a token with **Email Routing** read + edit permissions
