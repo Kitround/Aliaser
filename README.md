@@ -30,6 +30,10 @@ This app is 100% vibe coded using Claude Code so use it with caution, only in lo
 - Dark theme, responsive (mobile + desktop)
 - All data stored server-side, encrypted credentials
 
+## Extensions
+
+Chrome and Firefox extensions are available (soon on the addons stores).
+
 ## Screenshots
 
 ![aliaser-preview-1](https://github.com/user-attachments/assets/7e109b81-ac51-4f8f-902d-44e53b206ab8)
