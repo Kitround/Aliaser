@@ -68,6 +68,8 @@ Data is persisted in `app/json/` on the server:
 
 ## Deployment
 
+
+
 ### Docker with Portainer (recommended)
 
 1. Generate a secret key:
@@ -102,6 +104,8 @@ Data is persisted in `app/json/` on the server:
 
 5. Open `http://YOUR_HOST:8090` and add your accounts from Settings.
 
+
+
 ### Docker (standalone)
 
 1. Generate a secret key:
@@ -115,6 +119,8 @@ Data is persisted in `app/json/` on the server:
    ```
 
 3. Open `http://localhost:8090` and add your accounts from Settings.
+
+
 
 ### Manual (nginx / Apache + PHP 8.2+)
 
