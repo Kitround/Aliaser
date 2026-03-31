@@ -8,7 +8,7 @@ This app is 100% vibe coded using Claude Code so use it with caution, only in lo
 ![Vanilla JS](https://img.shields.io/badge/JS-Vanilla-f7df1e?logo=javascript&logoColor=black)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ed?logo=docker&logoColor=white)
 
-## Supported providers
+# Supported providers
 
 | Provider | List | Create | Delete | Disable | Notes | Contacts |
 |---|---|---|---|---|---|---|
@@ -18,7 +18,7 @@ This app is 100% vibe coded using Claude Code so use it with caution, only in lo
 | **Addy.io** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Cloudflare** | ✅ | ✅ | ✅ | — | ✅ | — |
 
-## Features
+# Features
 
 - Manage aliases from multiple providers and accounts in one place
 - Create aliases with custom or auto-generated names
@@ -30,11 +30,11 @@ This app is 100% vibe coded using Claude Code so use it with caution, only in lo
 - Dark theme, responsive (mobile + desktop)
 - All data stored server-side, encrypted credentials
 
-## Extensions
+# Extensions
 
 Chrome and Firefox extensions are available (soon on the addons stores).
 
-## Screenshots
+# Screenshots
 
 ![aliaser-preview-1](https://github.com/user-attachments/assets/7e109b81-ac51-4f8f-902d-44e53b206ab8)
 
@@ -42,7 +42,7 @@ Chrome and Firefox extensions are available (soon on the addons stores).
 
 ![aliaser-preview-3](https://github.com/user-attachments/assets/7fc968ae-909f-4e05-afc9-f26abb455783)
 
-## Architecture
+# Architecture
 
 No framework, no build step — vanilla JS + PHP.
 
@@ -66,11 +66,9 @@ Data is persisted in `app/json/` on the server:
 - `credentials.json` — API tokens (AES-256-CBC encrypted)
 - `addy-contacts.json` — Addy.io contacts cache
 
-## Deployment
+# Deployment
 
-
-
-### Docker with Portainer (recommended)
+## Docker with Portainer (recommended)
 
 1. Generate a secret key:
    ```bash
@@ -104,9 +102,7 @@ Data is persisted in `app/json/` on the server:
 
 5. Open `http://YOUR_HOST:8090` and add your accounts from Settings.
 
-
-
-### Docker (standalone)
+## Docker (standalone)
 
 1. Generate a secret key:
    ```bash
@@ -120,9 +116,7 @@ Data is persisted in `app/json/` on the server:
 
 3. Open `http://localhost:8090` and add your accounts from Settings.
 
-
-
-### Manual (nginx / Apache + PHP 8.2+)
+## Manual (nginx / Apache + PHP 8.2+)
 
 Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
 
@@ -142,7 +136,7 @@ Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
 
 4. Open the app in your browser and add your accounts from Settings.
 
-## Security
+# Security
 
 - API tokens are stored **encrypted** (AES-256-CBC) in `credentials.json` — never in plain text
 - Tokens are never written to `state.json`
