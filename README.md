@@ -68,6 +68,15 @@ Data is persisted in `app/json/` on the server:
 
 # Deployment
 
+## Security
+
+- API tokens are stored **encrypted** (AES-256-CBC) in `credentials.json` — never in plain text
+- Tokens are never written to `state.json`
+- Security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`
+- No authentication layer — intended for **private/LAN/VPN** use only
+
+> ⚠️ Do not expose this app on the public internet without adding authentication (e.g. HTTP Basic Auth via nginx).
+
 ## Docker with Portainer (recommended)
 
 1. Generate a secret key:
@@ -136,13 +145,5 @@ Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
 
 4. Open the app in your browser and add your accounts from Settings.
 
-## Security
-
-- API tokens are stored **encrypted** (AES-256-CBC) in `credentials.json` — never in plain text
-- Tokens are never written to `state.json`
-- Security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`
-- No authentication layer — intended for **private/LAN/VPN** use only
-
-> ⚠️ Do not expose this app on the public internet without adding authentication (e.g. HTTP Basic Auth via nginx).
 
 
