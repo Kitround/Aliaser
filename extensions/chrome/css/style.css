@@ -124,13 +124,6 @@ html,body{width:420px;height:580px;overflow:hidden;display:flex;flex-direction:c
 .error-banner.visible{opacity:1;pointer-events:auto}
 #error-text{word-break:break-word}
 
-/* ── Suggestions ── */
-.p-suggestion-wrap{padding:4px 12px 8px;border-top:1px solid var(--border)}
-.p-suggestion-label{font-size:.6rem;font-weight:600;letter-spacing:.08em;color:var(--text-dim);text-transform:uppercase;font-family:var(--mono);margin-bottom:4px}
-.p-suggestion-row{display:flex;align-items:center;justify-content:space-between;padding:5px 6px;border-radius:5px;cursor:pointer;gap:6px;transition:background var(--t)}
-.p-suggestion-row:hover{background:var(--surface3)}
-.p-suggestion-full{font-size:.78rem;color:var(--text);font-family:var(--mono);white-space:nowrap;overflow:hidden;mask-image:linear-gradient(to right,#000 80%,transparent 100%);flex:1;min-width:0}
-.suggestion-premium{font-size:.55rem;font-weight:600;color:var(--sl);border:1px solid var(--sl);border-radius:3px;padding:1px 4px;flex-shrink:0;white-space:nowrap;font-family:var(--mono)}
 
 /* ── Setup overlay ── */
 .setup-overlay{display:none;position:fixed;inset:0;background:var(--bg);z-index:999;flex-direction:column;justify-content:center;padding:28px 22px;gap:14px}

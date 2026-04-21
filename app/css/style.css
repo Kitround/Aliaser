@@ -189,12 +189,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .account-pill{background:var(--surface2);color:var(--text-muted);border:1px solid var(--border);border-radius:20px;padding:5px 12px;font-size:.76rem;font-family:var(--mono);cursor:pointer;transition:all var(--t);white-space:nowrap}
 
 .account-pill.active{background:var(--accent-soft);color:var(--accent);border-color:rgba(91,84,232,.4)}
-/* ── Alias suggestions ── */
-.alias-suggestions{display:flex;flex-direction:column;gap:4px}
-.suggestion-row{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg);cursor:pointer;transition:border-color var(--t),background var(--t)}
-.suggestion-row.suggestion-active{border-color:var(--accent);background:var(--accent-soft)}
-.suggestion-full{font-family:var(--mono);font-size:.76rem;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.suggestion-premium{font-size:.58rem;font-family:var(--mono);padding:1px 5px;border-radius:3px;background:var(--sl-soft);color:var(--sl);flex-shrink:0;opacity:.85}
 /* ── Modals ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity var(--t)}
 .modal-overlay.open{opacity:1;pointer-events:all}
@@ -350,7 +344,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .bar-btn:hover{background:var(--surface2);color:var(--accent)}
   .bar-btn.primary:hover{background:var(--accent-hover)}
   .account-pill:hover{border-color:var(--border2);color:var(--text)}
-  .suggestion-row:hover{border-color:var(--accent);background:var(--accent-soft)}
   .modal-close:hover{background:var(--surface2);color:var(--text)}
   .contact-item:hover{border-color:var(--border2)}
   .copy-reverse-btn:hover{background:var(--surface3);border-color:var(--border2);color:var(--text)}
@@ -367,5 +360,4 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .bar-btn:active{background:var(--surface2);color:var(--accent)}
 .bar-btn.primary:active{background:var(--accent-hover)}
 .account-pill:active{border-color:var(--border2);color:var(--text)}
-.suggestion-row:active{border-color:var(--accent);background:var(--accent-soft)}
 .modal-close:active{background:var(--surface2);color:var(--text)}

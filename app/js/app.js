@@ -1026,19 +1026,6 @@ function _getSelectedAccountId(){
 }
 
 // ── Render random suggestions ─────────────────────────────────────────────────
-function _slSortedSuffixes(acc){
-  const opts=state.slSuffixes[acc.id];
-  if(!opts||!opts.suffixes||!opts.suffixes.length)return[];
-  const suffixes=acc.isPremium
-    ?opts.suffixes
-    :opts.suffixes.filter(s=>!(s.is_custom||s.premium));
-  return[...suffixes].sort((a,b)=>{
-    const ap=a.is_custom||a.premium||false;
-    const bp=b.is_custom||b.premium||false;
-    return(bp?1:0)-(ap?1:0);
-  });
-}
-
 function populateSlSuffixDropdown(acc){
   const sel=document.getElementById('sl-suffix-select');
   const field=document.getElementById('sl-suffix-field');
@@ -1058,58 +1045,6 @@ function populateSlSuffixDropdown(acc){
   state.selectedSlSuffix=chosen?.suffix||null;
   state.selectedSlSignedSuffix=chosen?.signed_suffix||chosen?.['signed-suffix']||null;
   field.style.display='';
-}
-
-function renderAliasSuggestions(){
-  const el=document.getElementById('alias-suggestions');
-  if(!el)return;
-  const wrap=document.getElementById('alias-suggestions-wrap');
-  const accId=_getSelectedAccountId();
-  const acc=state.accounts.find(a=>a.id===accId);
-  const MAX_SUGGESTIONS=3;
-  const inputVal=document.getElementById('alias-name-input').value.trim();
-
-  if(acc&&acc.provider==='simplelogin'){
-    // SL selected: show random prefix suggestions with the currently selected domain
-    const opts=state.slSuffixes[acc.id];
-    if(!opts?.suffixes?.length){el.innerHTML='';if(wrap)wrap.style.display='none';return;}
-    const suffix=state.selectedSlSuffix||opts.suffixes[0]?.suffix||'';
-    if(!suffix){el.innerHTML='';if(wrap)wrap.style.display='none';return;}
-    if(wrap)wrap.style.display='';
-    el.innerHTML=Array.from({length:MAX_SUGGESTIONS},function(){
-      const name=generateAliasName();
-      return'<div class="suggestion-row" data-name="'+esc(name)+'" data-account-id="'+esc(acc.id)+'"><span class="suggestion-full">'+esc(name+suffix)+'</span></div>';
-    }).join('');
-    return;
-  }
-
-  // Mixed view: one row per account; SL uses its top suffix
-  const activePillId=document.querySelector('.account-pill.active')?.dataset.accountId||null;
-  var rows=[];
-  for(var i=0;i<state.accounts.length;i++){
-    var a=state.accounts[i];
-    if(activePillId&&a.id!==activePillId)continue;
-    if(a.provider==='addy'&&a.isFree)continue;
-    if(a.provider==='simplelogin'){
-      var slOpts=state.slSuffixes[a.id];
-      if(!slOpts?.suffixes?.length)continue;
-      var suffix=slOpts.suffixes[0]?.suffix||'';
-      if(!suffix)continue;
-      var prefix=inputVal||slOpts.prefixSuggestion||generateAliasName();
-      rows.push({accountId:a.id,full:prefix+suffix,name:prefix,isSL:false});
-    }else{
-      var domain=a.domain||(a.account&&a.account.includes('@')?a.account.split('@')[1]:'');
-      for(var j=0;j<MAX_SUGGESTIONS;j++){
-        var name=generateAliasName();
-        rows.push({accountId:a.id,full:name+'@'+domain,name:name,isSL:false});
-      }
-    }
-  }
-  if(!rows.length){el.innerHTML='';if(wrap)wrap.style.display='none';return;}
-  if(wrap)wrap.style.display='';
-  el.innerHTML=rows.map(function(r){
-    return'<div class="suggestion-row" data-name="'+esc(r.name)+'" data-account-id="'+esc(r.accountId)+'"><span class="suggestion-full">'+esc(r.full)+'</span></div>';
-  }).join('');
 }
 
 // ── Main render ───────────────────────────────────────────────────────────────
@@ -1627,13 +1562,12 @@ function openAddAlias(){
   const _defAcc=state.accounts.find(a=>a.id===(_getSelectedAccountId()||state.accounts[0]?.id));
   if(_defAcc?.provider==='simplelogin')populateSlSuffixDropdown(_defAcc);
   else{const f=document.getElementById('sl-suffix-field');if(f)f.style.display='none';}
-  renderAliasSuggestions();
   _updateAliasPreview();
   document.getElementById('modal-add').classList.add('open');
   setTimeout(()=>document.getElementById('alias-name-input').focus(),80);
   // Pre-fetch SL options for any SL account
   state.accounts.filter(a=>a.provider==='simplelogin').forEach(acc=>{
-    slGetOptions(acc).then(()=>{populateSlSuffixDropdown(acc); _updateAliasPreview(); renderAliasSuggestions(); }).catch(()=>{});
+    slGetOptions(acc).then(()=>{populateSlSuffixDropdown(acc); _updateAliasPreview(); }).catch(()=>{});
   });
 }
 function _closeMobSearch(){
@@ -1674,15 +1608,12 @@ function _updateAliasPreview(overrideAccId){
   const p=document.getElementById('alias-preview'),b=document.getElementById('btn-create-alias');
   const dupErr=document.getElementById('alias-duplicate-error');
   nameField.style.display='';
-  const suggestionsWrap=document.getElementById('alias-suggestions-wrap');
-  if(suggestionsWrap)suggestionsWrap.style.display='';
   const slSuffixField=document.getElementById('sl-suffix-field');
   if(slSuffixField)slSuffixField.style.display=isSL?'':'none';
   const _pt=t=>{p.innerHTML=`<span>${esc(t)}</span>`;};
   let isDuplicate=false;
   if(isAddyFree){
     nameField.style.display='none';
-    if(suggestionsWrap)suggestionsWrap.style.display='none';
     _pt('Auto-generated');
     p.classList.add('alias-preview-placeholder');
     if(dupErr)dupErr.style.display='none';
@@ -1732,7 +1663,6 @@ document.getElementById('new-alias-account-pills').addEventListener('click',e=>{
   const acc=state.accounts.find(a=>a.id===pill.dataset.accountId);
   if(acc?.provider==='simplelogin')populateSlSuffixDropdown(acc);
   else{const f=document.getElementById('sl-suffix-field');if(f)f.style.display='none';}
-  renderAliasSuggestions();
   _updateAliasPreview();
 });
 
@@ -1744,23 +1674,7 @@ document.getElementById('sl-suffix-select').addEventListener('change',function()
   const chosen=(opts?.suffixes||[]).find(s=>(s.signed_suffix||s['signed-suffix'])===this.value);
   state.selectedSlSuffix=chosen?.suffix||null;
   state.selectedSlSignedSuffix=chosen?.signed_suffix||chosen?.['signed-suffix']||null;
-  renderAliasSuggestions();
   _updateAliasPreview();
-});
-
-document.getElementById('alias-suggestions').addEventListener('click',e=>{
-  const row=e.target.closest('.suggestion-row');if(!row)return;
-  const name=row.dataset.name;
-  const rowAccId=row.dataset.accountId||null;
-  document.querySelectorAll('.account-pill').forEach(p=>{
-    p.classList.toggle('active',rowAccId!==null&&p.dataset.accountId===rowAccId);
-  });
-  document.querySelectorAll('.suggestion-row').forEach(r=>r.classList.remove('suggestion-active'));
-  document.getElementById('alias-name-input').value=name;
-  document.getElementById('btn-clear-alias-name').style.display=name?'':'none';
-  state.lastSelectedAccountId=row.dataset.accountId||null;
-  _updateAliasPreview(row.dataset.accountId);
-  document.getElementById('alias-name-input').focus();
 });
 
 document.getElementById('alias-name-input').addEventListener('input',e=>{
@@ -1776,7 +1690,6 @@ document.getElementById('btn-clear-alias-name').addEventListener('click',()=>{
   const inp=document.getElementById('alias-name-input');
   inp.value='';
   document.getElementById('btn-clear-alias-name').style.display='none';
-  document.querySelectorAll('.suggestion-row').forEach(r=>r.classList.remove('suggestion-active'));
   _updateAliasPreview();
   inp.focus();
 });
