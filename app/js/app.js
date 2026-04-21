@@ -1030,7 +1030,10 @@ function populateSlSuffixDropdown(acc){
   const sel=document.getElementById('sl-suffix-select');
   const field=document.getElementById('sl-suffix-field');
   if(!sel||!field)return;
-  const sorted=_slSortedSuffixes(acc);
+  const _opts=state.slSuffixes[acc.id];
+  if(!_opts?.suffixes?.length){field.style.display='none';return;}
+  const _all=acc.isPremium?_opts.suffixes:_opts.suffixes.filter(s=>!(s.is_custom||s.premium));
+  const sorted=[..._all].sort((a,b)=>((b.is_custom||b.premium)?1:0)-((a.is_custom||a.premium)?1:0));
   if(!sorted.length){field.style.display='none';return;}
   const prev=state.selectedSlSuffix;
   sel.innerHTML=sorted.map(function(s){
