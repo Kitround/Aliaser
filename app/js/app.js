@@ -384,7 +384,8 @@ async function slGetOptions(acc){
 
 async function slCreateAlias(acc,prefix='',note=''){
   const opts=await slGetOptions(acc);
-  const signedSuffix=state.selectedSlSignedSuffix;
+  const selEl=document.getElementById('sl-suffix-select');
+  const signedSuffix=selEl?.value||state.selectedSlSignedSuffix;
   let chosen;
   if(signedSuffix){
     chosen=opts.suffixes.find(s=>(s.signed_suffix||s['signed-suffix'])===signedSuffix)||opts.suffixes[0];
@@ -1038,6 +1039,27 @@ function _slSortedSuffixes(acc){
   });
 }
 
+function populateSlSuffixDropdown(acc){
+  const sel=document.getElementById('sl-suffix-select');
+  const field=document.getElementById('sl-suffix-field');
+  if(!sel||!field)return;
+  const sorted=_slSortedSuffixes(acc);
+  if(!sorted.length){field.style.display='none';return;}
+  const prev=state.selectedSlSuffix;
+  sel.innerHTML=sorted.map(function(s){
+    const label=(s.is_custom||s.premium)?'★ '+s.suffix:s.suffix;
+    return'<option value="'+esc(s.signed_suffix||s['signed-suffix']||'')+'"'+((prev&&prev===s.suffix)||(!prev&&sorted[0]===s)?'':'')+'>'+esc(label)+'</option>';
+  }).join('');
+  // Restore previously selected value if still available, else use first
+  const signed=sorted.find(s=>s.suffix===prev)?.signed_suffix||sorted[0]?.signed_suffix||sorted[0]?.['signed-suffix']||'';
+  sel.value=signed;
+  // Sync state to dropdown selection
+  const chosen=sorted.find(s=>(s.signed_suffix||s['signed-suffix'])===sel.value)||sorted[0];
+  state.selectedSlSuffix=chosen?.suffix||null;
+  state.selectedSlSignedSuffix=chosen?.signed_suffix||chosen?.['signed-suffix']||null;
+  field.style.display='';
+}
+
 function renderAliasSuggestions(){
   const el=document.getElementById('alias-suggestions');
   if(!el)return;
@@ -1048,17 +1070,15 @@ function renderAliasSuggestions(){
   const inputVal=document.getElementById('alias-name-input').value.trim();
 
   if(acc&&acc.provider==='simplelogin'){
-    // SL selected: show up to MAX_SUGGESTIONS suffixes (premium first)
-    const sorted=_slSortedSuffixes(acc);
-    if(!sorted.length){el.innerHTML='';if(wrap)wrap.style.display='none';return;}
+    // SL selected: show random prefix suggestions with the currently selected domain
     const opts=state.slSuffixes[acc.id];
-    const prefix=inputVal||opts.prefixSuggestion||generateAliasName();
-    const shown=sorted.slice(0,MAX_SUGGESTIONS);
+    if(!opts?.suffixes?.length){el.innerHTML='';if(wrap)wrap.style.display='none';return;}
+    const suffix=state.selectedSlSuffix||opts.suffixes[0]?.suffix||'';
+    if(!suffix){el.innerHTML='';if(wrap)wrap.style.display='none';return;}
     if(wrap)wrap.style.display='';
-    el.innerHTML=shown.map(function(s){
-      const signed=s.signed_suffix||s['signed-suffix']||'';
-      const prem=(s.is_custom||s.premium)?'<span class="suggestion-premium">premium</span>':'';
-      return'<div class="suggestion-row sl-suffix-row" data-name="'+esc(prefix)+'" data-account-id="'+esc(acc.id)+'" data-signed-suffix="'+esc(signed)+'" data-suffix="'+esc(s.suffix)+'"><span class="suggestion-full">'+esc(prefix+s.suffix)+'</span>'+prem+'</div>';
+    el.innerHTML=Array.from({length:MAX_SUGGESTIONS},function(){
+      const name=generateAliasName();
+      return'<div class="suggestion-row" data-name="'+esc(name)+'" data-account-id="'+esc(acc.id)+'"><span class="suggestion-full">'+esc(name+suffix)+'</span></div>';
     }).join('');
     return;
   }
@@ -1071,14 +1091,12 @@ function renderAliasSuggestions(){
     if(activePillId&&a.id!==activePillId)continue;
     if(a.provider==='addy'&&a.isFree)continue;
     if(a.provider==='simplelogin'){
-      var sorted=_slSortedSuffixes(a);
-      if(!sorted.length)continue;
-      var s=sorted[0];
-      var opts=state.slSuffixes[a.id];
-      var prefix=inputVal||opts.prefixSuggestion||generateAliasName();
-      var signed=s.signed_suffix||s['signed-suffix']||'';
-      var isPrem=!!(s.is_custom||s.premium);
-      rows.push({accountId:a.id,full:prefix+s.suffix,name:prefix,isSL:true,suffix:s.suffix,signedSuffix:signed,isPremium:isPrem});
+      var slOpts=state.slSuffixes[a.id];
+      if(!slOpts?.suffixes?.length)continue;
+      var suffix=slOpts.suffixes[0]?.suffix||'';
+      if(!suffix)continue;
+      var prefix=inputVal||slOpts.prefixSuggestion||generateAliasName();
+      rows.push({accountId:a.id,full:prefix+suffix,name:prefix,isSL:false});
     }else{
       var domain=a.domain||(a.account&&a.account.includes('@')?a.account.split('@')[1]:'');
       for(var j=0;j<MAX_SUGGESTIONS;j++){
@@ -1090,10 +1108,6 @@ function renderAliasSuggestions(){
   if(!rows.length){el.innerHTML='';if(wrap)wrap.style.display='none';return;}
   if(wrap)wrap.style.display='';
   el.innerHTML=rows.map(function(r){
-    if(r.isSL){
-      var prem=r.isPremium?'<span class="suggestion-premium">premium</span>':'';
-      return'<div class="suggestion-row sl-suffix-row" data-name="'+esc(r.name)+'" data-account-id="'+esc(r.accountId)+'" data-signed-suffix="'+esc(r.signedSuffix)+'" data-suffix="'+esc(r.suffix)+'"><span class="suggestion-full">'+esc(r.full)+'</span>'+prem+'</div>';
-    }
     return'<div class="suggestion-row" data-name="'+esc(r.name)+'" data-account-id="'+esc(r.accountId)+'"><span class="suggestion-full">'+esc(r.full)+'</span></div>';
   }).join('');
 }
@@ -1610,13 +1624,16 @@ function openAddAlias(){
   document.getElementById('btn-clear-alias-name').style.display='none';
   document.getElementById('alias-note-input').value='';
   document.getElementById('btn-create-alias').disabled=true;
+  const _defAcc=state.accounts.find(a=>a.id===(_getSelectedAccountId()||state.accounts[0]?.id));
+  if(_defAcc?.provider==='simplelogin')populateSlSuffixDropdown(_defAcc);
+  else{const f=document.getElementById('sl-suffix-field');if(f)f.style.display='none';}
   renderAliasSuggestions();
   _updateAliasPreview();
   document.getElementById('modal-add').classList.add('open');
   setTimeout(()=>document.getElementById('alias-name-input').focus(),80);
   // Pre-fetch SL options for any SL account
   state.accounts.filter(a=>a.provider==='simplelogin').forEach(acc=>{
-    slGetOptions(acc).then(()=>{ _updateAliasPreview(); renderAliasSuggestions(); }).catch(()=>{});
+    slGetOptions(acc).then(()=>{populateSlSuffixDropdown(acc); _updateAliasPreview(); renderAliasSuggestions(); }).catch(()=>{});
   });
 }
 function _closeMobSearch(){
@@ -1656,11 +1673,11 @@ function _updateAliasPreview(overrideAccId){
   const nameField=document.getElementById('alias-name-field');
   const p=document.getElementById('alias-preview'),b=document.getElementById('btn-create-alias');
   const dupErr=document.getElementById('alias-duplicate-error');
-  const slSelect=document.getElementById('sl-suffix-select-wrap');
-  if(slSelect)slSelect.remove();
   nameField.style.display='';
   const suggestionsWrap=document.getElementById('alias-suggestions-wrap');
   if(suggestionsWrap)suggestionsWrap.style.display='';
+  const slSuffixField=document.getElementById('sl-suffix-field');
+  if(slSuffixField)slSuffixField.style.display=isSL?'':'none';
   const _pt=t=>{p.innerHTML=`<span>${esc(t)}</span>`;};
   let isDuplicate=false;
   if(isAddyFree){
@@ -1675,11 +1692,10 @@ function _updateAliasPreview(overrideAccId){
   if(isSL){
     const slOpts=state.slSuffixes[accId];
     const ready=!!val;
-    let suffix='@simplelogin.io';
-    if(ready){
-      if(state.selectedSlSuffix)suffix=state.selectedSlSuffix;
-      else if(slOpts?.suffixes?.[0])suffix=slOpts.suffixes[0].suffix;
-    }
+    const selEl=document.getElementById('sl-suffix-select');
+    let suffix=selEl?.value
+      ?(slOpts?.suffixes||[]).find(s=>(s.signed_suffix||s['signed-suffix'])===selEl.value)?.suffix||'@simplelogin.io'
+      :(state.selectedSlSuffix||slOpts?.suffixes?.[0]?.suffix||'@simplelogin.io');
     _pt((val||'alias')+suffix);
     p.classList.toggle('alias-preview-placeholder',!ready);
     if(dupErr)dupErr.style.display='none';
@@ -1713,8 +1729,21 @@ document.getElementById('new-alias-account-pills').addEventListener('click',e=>{
   state.lastSelectedAccountId=null;
   state.selectedSlSignedSuffix=null;
   state.selectedSlSuffix=null;
-  // Reset active SL suffix on account switch
-  document.querySelectorAll('.sl-suffix-row').forEach(r=>r.classList.remove('sl-suffix-active'));
+  const acc=state.accounts.find(a=>a.id===pill.dataset.accountId);
+  if(acc?.provider==='simplelogin')populateSlSuffixDropdown(acc);
+  else{const f=document.getElementById('sl-suffix-field');if(f)f.style.display='none';}
+  renderAliasSuggestions();
+  _updateAliasPreview();
+});
+
+document.getElementById('sl-suffix-select').addEventListener('change',function(){
+  const accId=state.lastSelectedAccountId||_getSelectedAccountId();
+  const acc=state.accounts.find(a=>a.id===accId);
+  if(!acc)return;
+  const opts=state.slSuffixes[accId];
+  const chosen=(opts?.suffixes||[]).find(s=>(s.signed_suffix||s['signed-suffix'])===this.value);
+  state.selectedSlSuffix=chosen?.suffix||null;
+  state.selectedSlSignedSuffix=chosen?.signed_suffix||chosen?.['signed-suffix']||null;
   renderAliasSuggestions();
   _updateAliasPreview();
 });
@@ -1726,18 +1755,7 @@ document.getElementById('alias-suggestions').addEventListener('click',e=>{
   document.querySelectorAll('.account-pill').forEach(p=>{
     p.classList.toggle('active',rowAccId!==null&&p.dataset.accountId===rowAccId);
   });
-  // SL suffix row: fill prefix input, update preview (no persistent highlight)
-  if(row.classList.contains('sl-suffix-row')){
-    document.querySelectorAll('.suggestion-row').forEach(r=>r.classList.remove('suggestion-active','sl-suffix-active'));
-    state.selectedSlSignedSuffix=row.dataset.signedSuffix||null;
-    state.selectedSlSuffix=row.dataset.suffix||null;
-    if(name){document.getElementById('alias-name-input').value=name;document.getElementById('btn-clear-alias-name').style.display='';}
-    state.lastSelectedAccountId=row.dataset.accountId||null;
-    _updateAliasPreview();
-    document.getElementById('alias-name-input').focus();
-    return;
-  }
-  document.querySelectorAll('.suggestion-row').forEach(r=>r.classList.remove('suggestion-active','sl-suffix-active'));
+  document.querySelectorAll('.suggestion-row').forEach(r=>r.classList.remove('suggestion-active'));
   document.getElementById('alias-name-input').value=name;
   document.getElementById('btn-clear-alias-name').style.display=name?'':'none';
   state.lastSelectedAccountId=row.dataset.accountId||null;
@@ -1749,17 +1767,6 @@ document.getElementById('alias-name-input').addEventListener('input',e=>{
   const raw=e.target.value,filtered=raw.replace(/[^a-zA-Z0-9_]/g,'');
   if(filtered!==raw)e.target.value=filtered;
   document.getElementById('btn-clear-alias-name').style.display=e.target.value?'':'none';
-  // Update SL suffix rows label live without regenerating
-  const inputVal=e.target.value.trim();
-  document.querySelectorAll('.suggestion-row.sl-suffix-row').forEach(r=>{
-    const suffix=r.dataset.suffix||'';
-    const opts=state.slSuffixes[r.dataset.accountId];
-    const fallback=opts?.prefixSuggestion||r.dataset.name||'';
-    const prefix=inputVal||fallback;
-    r.dataset.name=prefix;
-    const full=r.querySelector('.suggestion-full');
-    if(full)full.textContent=prefix+suffix;
-  });
   _updateAliasPreview(state.lastSelectedAccountId||undefined);
 });
 document.getElementById('alias-name-input').addEventListener('keydown',e=>{
@@ -1769,7 +1776,7 @@ document.getElementById('btn-clear-alias-name').addEventListener('click',()=>{
   const inp=document.getElementById('alias-name-input');
   inp.value='';
   document.getElementById('btn-clear-alias-name').style.display='none';
-  document.querySelectorAll('.suggestion-row').forEach(r=>r.classList.remove('suggestion-active','sl-suffix-active'));
+  document.querySelectorAll('.suggestion-row').forEach(r=>r.classList.remove('suggestion-active'));
   _updateAliasPreview();
   inp.focus();
 });
