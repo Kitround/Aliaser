@@ -801,65 +801,6 @@ function updateCount() {
   else el.classList.remove('visible');
 }
 
-// ── Suggestions ───────────────────────────────────────────────────────────────
-function _slSortedSuffixes(acc) {
-  const opts = ps.slOptions[acc.id];
-  if (!opts?.suffixes?.length) return [];
-  const suffixes = acc.isPremium
-    ? opts.suffixes
-    : opts.suffixes.filter(s => !(s.is_custom || s.premium));
-  return [...suffixes].sort((a, b) => ((b.is_custom || b.premium) ? 1 : 0) - ((a.is_custom || a.premium) ? 1 : 0));
-}
-
-function renderSuggestions() {
-  const el   = document.getElementById('p-suggestions');
-  const wrap = document.getElementById('p-suggestion-wrap');
-  if (!el || !wrap) return;
-  const acc = ps.accounts.find(a => a.id === ps.selectedAccountId);
-  if (!acc) { wrap.style.display = 'none'; return; }
-
-  const MAX  = 3;
-  const rows = [];
-
-  if (acc.provider === 'simplelogin') {
-    const opts   = ps.slOptions[acc.id];
-    if (!opts?.suffixes?.length) { wrap.style.display = 'none'; return; }
-    const selEl  = document.getElementById('p-suffix-select');
-    const chosen = selEl?.value
-      ? (opts.suffixes.find(s => (s.signed_suffix || s['signed-suffix']) === selEl.value) || ps.selectedSuffix[acc.id] || opts.suffixes[0])
-      : (ps.selectedSuffix[acc.id] || opts.suffixes[0]);
-    const suffix = chosen?.suffix || '';
-    if (!suffix) { wrap.style.display = 'none'; return; }
-    for (let j = 0; j < MAX; j++) {
-      const name = generateAliasName();
-      rows.push({ full: name + suffix, name, isSL: false });
-    }
-  } else if (acc.provider === 'addy' && acc.isFree) {
-    wrap.style.display = 'none'; return;
-  } else {
-    const domain = acc.domain || (acc.account?.includes('@') ? acc.account.split('@')[1] : '');
-    if (!domain) { wrap.style.display = 'none'; return; }
-    for (let j = 0; j < MAX; j++) {
-      const name = generateAliasName();
-      rows.push({ full: name + '@' + domain, name, isSL: false });
-    }
-  }
-
-  if (!rows.length) { wrap.style.display = 'none'; return; }
-  wrap.style.display = '';
-  el.innerHTML = rows.map(r =>
-    `<div class="p-suggestion-row" data-full="${esc(r.full)}" data-account-id="${esc(acc.id)}" data-name="${esc(r.name)}"><span class="p-suggestion-full">${esc(r.full)}</span></div>`
-  ).join('');
-}
-
-document.getElementById('p-suggestions').addEventListener('click', async e => {
-  const row = e.target.closest('.p-suggestion-row');
-  if (!row) return;
-  document.getElementById('p-name').value = row.dataset.name;
-  updatePreview();
-  document.getElementById('p-create-btn').click();
-});
-
 // ── Account pills ─────────────────────────────────────────────────────────────
 function renderPills() {
   const el = document.getElementById('p-pills');
@@ -885,7 +826,6 @@ async function selectAccount(id) {
     document.getElementById('p-suffix-field').style.display = 'none';
   }
   updatePreview();
-  renderSuggestions();
 }
 
 async function loadSlOptions(acc) {
@@ -898,7 +838,8 @@ function populateSlSuffixSelect(acc) {
   const sel      = document.getElementById('p-suffix-select');
   const suffixes = ps.slOptions[acc.id]?.suffixes || [];
   if (!sel || !suffixes.length) return;
-  const sorted   = _slSortedSuffixes(acc);
+  const all    = acc.isPremium ? suffixes : suffixes.filter(s => !(s.is_custom || s.premium));
+  const sorted = [...all].sort((a, b) => ((b.is_custom || b.premium) ? 1 : 0) - ((a.is_custom || a.premium) ? 1 : 0));
   const current  = ps.selectedSuffix[acc.id];
   sel.innerHTML  = sorted.map(s => {
     const label = (s.is_custom || s.premium) ? '★ ' + s.suffix : s.suffix;
@@ -988,7 +929,7 @@ document.getElementById('p-suffix-select').addEventListener('change', function (
   const acc = ps.accounts.find(a => a.id === ps.selectedAccountId);
   if (acc) {
     const found = (ps.slOptions[acc.id]?.suffixes || []).find(s => (s.signed_suffix || s['signed-suffix']) === this.value);
-    if (found) { ps.selectedSuffix[acc.id] = found; renderSuggestions(); updatePreview(); }
+    if (found) { ps.selectedSuffix[acc.id] = found; updatePreview(); }
   }
 });
 
@@ -1080,7 +1021,6 @@ async function init() {
       document.getElementById('p-suffix-field').style.display = '';
     }
 
-    renderSuggestions();
     fillFromTab();
     fetchAll();
   } catch (e) {
