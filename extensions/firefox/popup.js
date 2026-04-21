@@ -828,14 +828,18 @@ function renderSuggestions() {
   const MAX  = 3;
   const rows = [];
   if (acc.provider === 'simplelogin') {
-    const sorted = _slSortedSuffixes(acc);
-    if (!sorted.length) { wrap.style.display = 'none'; return; }
-    const opts   = ps.slOptions[acc.id] || {};
-    const prefix = opts.prefixSuggestion || generateAliasName();
-    sorted.slice(0, MAX).forEach(s => {
-      const signed = s.signed_suffix || s['signed-suffix'] || '';
-      rows.push({ full: prefix + s.suffix, name: prefix, isSL: true, suffix: s.suffix, signedSuffix: signed, isPremium: !!(s.is_custom || s.premium) });
-    });
+    const opts   = ps.slOptions[acc.id];
+    if (!opts?.suffixes?.length) { wrap.style.display = 'none'; return; }
+    const selEl  = document.getElementById('p-suffix-select');
+    const chosen = selEl?.value
+      ? (opts.suffixes.find(s => (s.signed_suffix || s['signed-suffix']) === selEl.value) || ps.selectedSuffix[acc.id] || opts.suffixes[0])
+      : (ps.selectedSuffix[acc.id] || opts.suffixes[0]);
+    const suffix = chosen?.suffix || '';
+    if (!suffix) { wrap.style.display = 'none'; return; }
+    for (let j = 0; j < MAX; j++) {
+      const name = generateAliasName();
+      rows.push({ full: name + suffix, name, isSL: false });
+    }
   } else if (acc.provider === 'addy' && acc.isFree) {
     wrap.style.display = 'none'; return;
   } else {
@@ -848,31 +852,15 @@ function renderSuggestions() {
   }
   if (!rows.length) { wrap.style.display = 'none'; return; }
   wrap.style.display = '';
-  setHTML(el, rows.map(r => {
-    const prem  = r.isPremium ? '<span class="suggestion-premium">premium</span>' : '';
-    const extra = r.isSL
-      ? ` data-name="${esc(r.name)}" data-suffix="${esc(r.suffix)}" data-signed="${esc(r.signedSuffix)}"`
-      : ` data-name="${esc(r.name)}"`;
-    return `<div class="p-suggestion-row" data-full="${esc(r.full)}" data-account-id="${esc(acc.id)}"${extra}><span class="p-suggestion-full">${esc(r.full)}</span>${prem}</div>`;
-  }).join(''));
+  setHTML(el, rows.map(r =>
+    `<div class="p-suggestion-row" data-full="${esc(r.full)}" data-account-id="${esc(acc.id)}" data-name="${esc(r.name)}"><span class="p-suggestion-full">${esc(r.full)}</span></div>`
+  ).join(''));
 }
 
 document.getElementById('p-suggestions').addEventListener('click', async e => {
   const row = e.target.closest('.p-suggestion-row');
   if (!row) return;
-  const name   = row.dataset.name;
-  const suffix = row.dataset.suffix || null;
-
-  // For SL: pre-select the suffix by its plain value (slCreateAlias will refresh the signed token)
-  if (suffix) {
-    const acc = ps.accounts.find(a => a.id === ps.selectedAccountId);
-    if (acc) {
-      const found = (ps.slOptions[acc.id]?.suffixes || []).find(s => s.suffix === suffix);
-      if (found) { ps.selectedSuffix[acc.id] = found; renderSlSuffixes(acc); }
-    }
-  }
-  // Fill input and auto-create
-  document.getElementById('p-name').value = name;
+  document.getElementById('p-name').value = row.dataset.name;
   updatePreview();
   document.getElementById('p-create-btn').click();
 });
@@ -896,10 +884,10 @@ async function selectAccount(id) {
 
   if (acc?.provider === 'simplelogin') {
     await loadSlOptions(acc);
-    renderSlSuffixes(acc);
-    document.getElementById('p-suffix-wrap').style.display = '';
+    populateSlSuffixSelect(acc);
+    document.getElementById('p-suffix-field').style.display = '';
   } else {
-    document.getElementById('p-suffix-wrap').style.display = 'none';
+    document.getElementById('p-suffix-field').style.display = 'none';
   }
   updatePreview();
   renderSuggestions();
@@ -911,13 +899,20 @@ async function loadSlOptions(acc) {
     ps.selectedSuffix[acc.id] = opts.suffixes[0];
 }
 
-function renderSlSuffixes(acc) {
-  const chips    = document.getElementById('p-suffix-chips');
+function populateSlSuffixSelect(acc) {
+  const sel      = document.getElementById('p-suffix-select');
   const suffixes = ps.slOptions[acc.id]?.suffixes || [];
-  const sel      = ps.selectedSuffix[acc.id];
-  setHTML(chips, suffixes.map(s =>
-    `<button class="p-suffix-chip${s.signed_suffix === sel?.signed_suffix ? ' active' : ''}" data-signed="${esc(s.signed_suffix)}" data-suffix="${esc(s.suffix)}">${esc(s.suffix)}</button>`
-  ).join(''));
+  if (!sel || !suffixes.length) return;
+  const sorted   = _slSortedSuffixes(acc);
+  const current  = ps.selectedSuffix[acc.id];
+  setHTML(sel, sorted.map(s => {
+    const label = (s.is_custom || s.premium) ? '★ ' + s.suffix : s.suffix;
+    return `<option value="${esc(s.signed_suffix || s['signed-suffix'] || '')}">${esc(label)}</option>`;
+  }).join(''));
+  const signed   = current?.signed_suffix || current?.['signed-suffix'] || sorted[0]?.signed_suffix || '';
+  sel.value      = signed;
+  const chosen   = sorted.find(s => (s.signed_suffix || s['signed-suffix']) === sel.value) || sorted[0];
+  if (chosen) ps.selectedSuffix[acc.id] = chosen;
 }
 
 // ── Preview ───────────────────────────────────────────────────────────────────
@@ -939,7 +934,10 @@ function updatePreview() {
   if (isAddyFree) { _pt('Auto-generated', true); btn.disabled = false; return; }
 
   if (acc.provider === 'simplelogin') {
-    const suf    = ps.selectedSuffix[acc.id];
+    const selEl  = document.getElementById('p-suffix-select');
+    const suf    = selEl?.value
+      ? (ps.slOptions[acc.id]?.suffixes || []).find(s => (s.signed_suffix || s['signed-suffix']) === selEl.value) || ps.selectedSuffix[acc.id]
+      : ps.selectedSuffix[acc.id];
     const suffix = suf ? suf.suffix : (acc.domain ? '@' + acc.domain : '');
     _pt((name || 'alias') + suffix, !name);
     btn.disabled = !name;
@@ -997,14 +995,11 @@ document.getElementById('p-pills').addEventListener('click', e => {
   if (pill) selectAccount(pill.dataset.id);
 });
 
-document.getElementById('p-suffix-chips').addEventListener('click', e => {
-  const chip = e.target.closest('.p-suffix-chip');
-  if (!chip) return;
+document.getElementById('p-suffix-select').addEventListener('change', function () {
   const acc = ps.accounts.find(a => a.id === ps.selectedAccountId);
   if (acc) {
-    const suffixes = ps.slOptions[acc.id]?.suffixes || [];
-    const found    = suffixes.find(s => s.signed_suffix === chip.dataset.signed);
-    if (found) { ps.selectedSuffix[acc.id] = found; renderSlSuffixes(acc); updatePreview(); }
+    const found = (ps.slOptions[acc.id]?.suffixes || []).find(s => (s.signed_suffix || s['signed-suffix']) === this.value);
+    if (found) { ps.selectedSuffix[acc.id] = found; renderSuggestions(); updatePreview(); }
   }
 });
 
@@ -1092,8 +1087,8 @@ async function init() {
 
     if (def.provider === 'simplelogin') {
       await loadSlOptions(def);
-      renderSlSuffixes(def);
-      document.getElementById('p-suffix-wrap').style.display = '';
+      populateSlSuffixSelect(def);
+      document.getElementById('p-suffix-field').style.display = '';
     }
 
     renderSuggestions();

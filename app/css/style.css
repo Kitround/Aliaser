@@ -142,6 +142,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .field-input::placeholder{color:var(--text-dim);opacity:.5}
 .field-hint{font-size:.7rem;color:var(--text-dim);opacity:.5;font-family:var(--mono)}
 .field-textarea{resize:none;line-height:1.5;font-family:var(--sans);font-size:.76rem}
+.field-select{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23808080' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+.field-select option{background:var(--surface);color:var(--text)}
 .alias-note{font-size:.72rem;color:var(--text-dim);margin-top:8px;line-height:1.2;height:1.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .alias-note-empty{font-size:.72rem;color:var(--text-dim);margin-top:8px;line-height:1.2;height:1.2em;opacity:.25;font-style:italic;user-select:none;white-space:nowrap;overflow:hidden}
 .alias-letter{display:none}
@@ -191,7 +193,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .alias-suggestions{display:flex;flex-direction:column;gap:4px}
 .suggestion-row{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg);cursor:pointer;transition:border-color var(--t),background var(--t)}
 .suggestion-row.suggestion-active{border-color:var(--accent);background:var(--accent-soft)}
-.suggestion-row.sl-suffix-active{border-color:var(--sl);background:var(--sl-soft)}
 .suggestion-full{font-family:var(--mono);font-size:.76rem;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .suggestion-premium{font-size:.58rem;font-family:var(--mono);padding:1px 5px;border-radius:3px;background:var(--sl-soft);color:var(--sl);flex-shrink:0;opacity:.85}
 /* ── Modals ── */
@@ -350,7 +351,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .bar-btn.primary:hover{background:var(--accent-hover)}
   .account-pill:hover{border-color:var(--border2);color:var(--text)}
   .suggestion-row:hover{border-color:var(--accent);background:var(--accent-soft)}
-  .suggestion-row.sl-suffix-row:hover{border-color:var(--sl);background:var(--sl-soft)}
   .modal-close:hover{background:var(--surface2);color:var(--text)}
   .contact-item:hover{border-color:var(--border2)}
   .copy-reverse-btn:hover{background:var(--surface3);border-color:var(--border2);color:var(--text)}
@@ -368,5 +368,4 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .bar-btn.primary:active{background:var(--accent-hover)}
 .account-pill:active{border-color:var(--border2);color:var(--text)}
 .suggestion-row:active{border-color:var(--accent);background:var(--accent-soft)}
-.suggestion-row.sl-suffix-row:active{border-color:var(--sl);background:var(--sl-soft)}
 .modal-close:active{background:var(--surface2);color:var(--text)}

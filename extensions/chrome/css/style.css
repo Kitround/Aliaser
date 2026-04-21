@@ -44,13 +44,10 @@ html,body{width:420px;height:580px;overflow:hidden;display:flex;flex-direction:c
 .p-input:focus{border-color:var(--accent)}
 .p-input::placeholder{color:var(--text-dim)}
 
-/* ── SL suffix chips ── */
-.p-suffix-wrap{margin-top:7px;display:none}
-.p-suffix-label{font-size:.6rem;font-family:var(--mono);color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
-.p-suffix-chips{display:flex;flex-wrap:wrap;gap:4px}
-.p-suffix-chip{font-size:.65rem;font-family:var(--mono);padding:3px 8px;border-radius:50px;border:1px solid var(--border2);color:var(--text-dim);background:transparent;cursor:pointer;transition:all .15s;white-space:nowrap}
-.p-suffix-chip:hover{border-color:var(--sl);color:var(--sl)}
-.p-suffix-chip.active{border-color:var(--sl);color:var(--sl);background:var(--sl-soft)}
+/* ── SL suffix dropdown ── */
+.p-suffix-field{margin-top:7px}
+.p-select{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23808080' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+.p-select option{background:var(--surface);color:var(--text)}
 
 /* ── Preview ── */
 .p-preview{margin-top:7px;font-family:var(--mono);font-size:.8rem;font-weight:500;color:#fff;background:var(--accent);border:1px solid var(--accent);border-radius:20px;padding:5px 12px;display:flex;align-items:center;min-height:0;cursor:default;overflow:hidden;white-space:nowrap;transition:all var(--t)}
