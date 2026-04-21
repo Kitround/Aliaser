@@ -260,16 +260,9 @@ async function ovhFetchForAccount(acc){
   }
   const zid=await ovhGetZimbraAccountId(acc,pid);
   const fa=acc.account.includes('@')?acc.account:acc.account+'@'+acc.domain;
-  // Paginate through all aliases (OVH v2 returns cursor-based pages)
-  const data=[];
-  let cursor=null;
-  do{
-    const path='/zimbra/platform/'+pid+'/alias'+(cursor?'?cursor='+encodeURIComponent(cursor):'');
-    const raw=await ovhCall(acc,'GET',path);
-    const page=Array.isArray(raw)?raw:(raw?.items||[]);
-    data.push(...page);
-    cursor=Array.isArray(raw)?null:(raw?.cursor?.next||null);
-  }while(cursor);
+  // Pagination is handled server-side by the proxy — single call returns the full list
+  const raw=await ovhCall(acc,'GET','/zimbra/platform/'+pid+'/alias');
+  const data=Array.isArray(raw)?raw:(raw?.items||[]);
   return data
     .map(o=>{
       const id=o.id,ae=o.currentState?.alias?.name;

@@ -301,6 +301,55 @@ function handleHaltman($method, $path, $body) {
 }
 
 // ── OVH ───────────────────────────────────────────────────────────────────────
+
+// Make a signed OVH request and return ['code', 'body', 'headers'] — used for
+// cases where we need to inspect response headers (e.g. pagination cursor).
+function ovhSignedRequest($method, $url, $appKey, $appSecret, $consumerKey, $body, $extraHeaders = []) {
+    $timestamp = (string) time();
+    $toSign    = $appSecret . '+' . $consumerKey . '+' . $method . '+' . $url . '+' . $body . '+' . $timestamp;
+    $signature = '$1$' . sha1($toSign);
+    $hdrs = [
+        'Content-Type: application/json',
+        'X-Ovh-Application: ' . $appKey,
+        'X-Ovh-Timestamp: ' . $timestamp,
+    ];
+    if (!empty($consumerKey)) {
+        $hdrs[] = 'X-Ovh-Consumer: '  . $consumerKey;
+        $hdrs[] = 'X-Ovh-Signature: ' . $signature;
+    }
+    foreach ($extraHeaders as $h) { $hdrs[] = $h; }
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST,  $method);
+    curl_setopt($ch, CURLOPT_HTTPHEADER,     $hdrs);
+    curl_setopt($ch, CURLOPT_TIMEOUT,        30);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_HEADER,         true); // include response headers in output
+    if (in_array($method, ['POST','PUT','DELETE']) && !empty($body)) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    }
+    $raw       = curl_exec($ch);
+    $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $hdrSize   = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+    if ($curlError) {
+        return ['code' => 502, 'body' => json_encode(['error' => 'Network error']), 'headers' => []];
+    }
+    $hdrStr  = substr($raw, 0, $hdrSize);
+    $bodyStr = substr($raw, $hdrSize);
+    $parsedHdrs = [];
+    foreach (explode("\r\n", $hdrStr) as $line) {
+        $pos = strpos($line, ':');
+        if ($pos !== false) {
+            $k = strtolower(trim(substr($line, 0, $pos)));
+            $v = trim(substr($line, $pos + 1));
+            $parsedHdrs[$k] = $v;
+        }
+    }
+    return ['code' => $httpCode, 'body' => $bodyStr, 'headers' => $parsedHdrs];
+}
+
 function handleOVH($method, $path, $body, $input) {
     $creds     = readCredentials();
     $appKey    = (!empty($input['appKey']))    ? $input['appKey']    : ($creds['ovhAppKey']    ?? '');
@@ -311,11 +360,48 @@ function handleOVH($method, $path, $body, $input) {
     $consumerKey = $input['consumerKey'] ?? '';
     $useV2       = $input['useV2'] ?? false;
     $base        = $useV2 ? 'https://eu.api.ovh.com/v2' : 'https://eu.api.ovh.com/1.0';
-    $url         = $base . $path;
-    $timestamp   = (string) time();
-    $toSign      = $appSecret . '+' . $consumerKey . '+' . $method . '+' . $url . '+' . $body . '+' . $timestamp;
-    $signature   = '$1$' . sha1($toSign);
 
+    // OVH v2 alias list: paginate server-side (cursor may be in response header or body)
+    // and return the complete flat array in one response.
+    if ($useV2 && $method === 'GET' && preg_match('#^/zimbra/platform/[^/]+/alias$#', $path)) {
+        $allItems = [];
+        $cursor   = null;
+        for ($page = 0; $page < 50; $page++) { // safety cap: 50 pages max
+            $currentUrl    = $base . $path;
+            $extraHeaders  = $cursor ? ['X-Pagination-Cursor: ' . $cursor] : [];
+            $res = ovhSignedRequest('GET', $currentUrl, $appKey, $appSecret, $consumerKey, '', $extraHeaders);
+            if ($res['code'] >= 400) {
+                http_response_code($res['code']);
+                echo $res['body'];
+                return;
+            }
+            $data = json_decode($res['body'], true);
+            if (is_array($data)) {
+                if (isset($data['items']) && is_array($data['items'])) {
+                    // Object format: { items: [...], cursor: { next: "..." } }
+                    $allItems = array_merge($allItems, $data['items']);
+                    $cursor   = $data['cursor']['next'] ?? null;
+                } else {
+                    // Plain array format
+                    $allItems = array_merge($allItems, $data);
+                    $cursor   = null;
+                }
+            }
+            // Cursor may also (or exclusively) be in the response header
+            if (empty($cursor)) {
+                $cursor = $res['headers']['x-pagination-cursor-next'] ?? null;
+            }
+            if (empty($cursor)) break;
+        }
+        http_response_code(200);
+        echo json_encode(array_values($allItems));
+        return;
+    }
+
+    $url       = $base . $path;
+    $timestamp = (string) time();
+    $toSign    = $appSecret . '+' . $consumerKey . '+' . $method . '+' . $url . '+' . $body . '+' . $timestamp;
+    $signature = '$1$' . sha1($toSign);
     $headers = [
         'Content-Type: application/json',
         'X-Ovh-Application: ' . $appKey,
