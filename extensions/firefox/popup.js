@@ -809,6 +809,74 @@ function updateCount() {
   else el.classList.remove('visible');
 }
 
+// ── Suggestions ───────────────────────────────────────────────────────────────
+function _slSortedSuffixes(acc) {
+  const opts = ps.slOptions[acc.id];
+  if (!opts?.suffixes?.length) return [];
+  const suffixes = acc.isPremium
+    ? opts.suffixes
+    : opts.suffixes.filter(s => !(s.is_custom || s.premium));
+  return [...suffixes].sort((a, b) => ((b.is_custom || b.premium) ? 1 : 0) - ((a.is_custom || a.premium) ? 1 : 0));
+}
+
+function renderSuggestions() {
+  const el   = document.getElementById('p-suggestions');
+  const wrap = document.getElementById('p-suggestion-wrap');
+  if (!el || !wrap) return;
+  const acc = ps.accounts.find(a => a.id === ps.selectedAccountId);
+  if (!acc) { wrap.style.display = 'none'; return; }
+  const MAX  = 3;
+  const rows = [];
+  if (acc.provider === 'simplelogin') {
+    const sorted = _slSortedSuffixes(acc);
+    if (!sorted.length) { wrap.style.display = 'none'; return; }
+    const opts   = ps.slOptions[acc.id] || {};
+    const prefix = opts.prefixSuggestion || generateAliasName();
+    sorted.slice(0, MAX).forEach(s => {
+      const signed = s.signed_suffix || s['signed-suffix'] || '';
+      rows.push({ full: prefix + s.suffix, name: prefix, isSL: true, suffix: s.suffix, signedSuffix: signed, isPremium: !!(s.is_custom || s.premium) });
+    });
+  } else if (acc.provider === 'addy' && acc.isFree) {
+    wrap.style.display = 'none'; return;
+  } else {
+    const domain = acc.domain || (acc.account?.includes('@') ? acc.account.split('@')[1] : '');
+    if (!domain) { wrap.style.display = 'none'; return; }
+    for (let j = 0; j < MAX; j++) {
+      const name = generateAliasName();
+      rows.push({ full: name + '@' + domain, name, isSL: false });
+    }
+  }
+  if (!rows.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  setHTML(el, rows.map(r => {
+    const prem  = r.isPremium ? '<span class="suggestion-premium">premium</span>' : '';
+    const extra = r.isSL
+      ? ` data-name="${esc(r.name)}" data-suffix="${esc(r.suffix)}" data-signed="${esc(r.signedSuffix)}"`
+      : ` data-name="${esc(r.name)}"`;
+    return `<div class="p-suggestion-row" data-full="${esc(r.full)}" data-account-id="${esc(acc.id)}"${extra}><span class="p-suggestion-full">${esc(r.full)}</span>${prem}</div>`;
+  }).join(''));
+}
+
+document.getElementById('p-suggestions').addEventListener('click', async e => {
+  const row = e.target.closest('.p-suggestion-row');
+  if (!row) return;
+  const name   = row.dataset.name;
+  const suffix = row.dataset.suffix || null;
+
+  // For SL: pre-select the suffix by its plain value (slCreateAlias will refresh the signed token)
+  if (suffix) {
+    const acc = ps.accounts.find(a => a.id === ps.selectedAccountId);
+    if (acc) {
+      const found = (ps.slOptions[acc.id]?.suffixes || []).find(s => s.suffix === suffix);
+      if (found) { ps.selectedSuffix[acc.id] = found; renderSlSuffixes(acc); }
+    }
+  }
+  // Fill input and auto-create
+  document.getElementById('p-name').value = name;
+  updatePreview();
+  document.getElementById('p-create-btn').click();
+});
+
 // ── Account pills ─────────────────────────────────────────────────────────────
 function renderPills() {
   const el = document.getElementById('p-pills');
@@ -834,6 +902,7 @@ async function selectAccount(id) {
     document.getElementById('p-suffix-wrap').style.display = 'none';
   }
   updatePreview();
+  renderSuggestions();
 }
 
 async function loadSlOptions(acc) {
@@ -1027,6 +1096,7 @@ async function init() {
       document.getElementById('p-suffix-wrap').style.display = '';
     }
 
+    renderSuggestions();
     fillFromTab();
     fetchAll();
   } catch (e) {
