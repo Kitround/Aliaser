@@ -1,8 +1,6 @@
 services:
   aliaser:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: sixtyfold5687/aliaser:latest
     ports:
       - "8090:80"
     volumes:
