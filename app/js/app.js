@@ -717,7 +717,6 @@ async function createAlias(aliasName,accountId,note=''){
     state.aliases.sort((a,b)=>a.aliasAddress.localeCompare(b.aliasAddress));
     if(note.trim()){state.notes[newAlias.aliasAddress]=note.trim();await saveNotes();}
     await saveServerState();
-    _lastListKey='';
     applyFilter();render();
     return newAlias;
   }catch(e){
@@ -790,7 +789,7 @@ async function enableAlias(alias){
   if(!acc)throw new Error('Account not found');
   const idx=state.aliases.findIndex(a=>a.aliasAddress===alias.aliasAddress&&a.accountId===alias.accountId);
   if(idx!==-1)state.aliases[idx]={...state.aliases[idx],pending:true,disabled:false};
-  _lastListKey='';applyFilter();render();
+  applyFilter();render();
   try{
     if(alias.provider==='simplelogin'){
       await slToggleAlias(alias);
@@ -812,11 +811,11 @@ async function enableAlias(alias){
       if(i!==-1)state.aliases[i]=newAlias;
       await saveServerState();
     }
-    _lastListKey='';applyFilter();render();
+    applyFilter();render();
   }catch(e){
     const i=state.aliases.findIndex(a=>a.aliasAddress===alias.aliasAddress&&a.accountId===alias.accountId);
     if(i!==-1)state.aliases[i]={...alias,disabled:true,pending:false};
-    _lastListKey='';applyFilter();render();
+    applyFilter();render();
     throw e;
   }
 }
@@ -832,14 +831,10 @@ function applyFilter(){
 function canAddAlias(){return state.accounts.length>0}
 
 // ── Render list ───────────────────────────────────────────────────────────────
-let _lastListKey='';
 function renderList(){
   const hasList=canAddAlias()&&state.dataLoaded&&state.filteredAliases.length>0;
   const listEl=document.getElementById('alias-list');
   if(!hasList){if(listEl.innerHTML)listEl.innerHTML='';return;}
-  const key=state.filteredAliases.map(a=>a.id+'|'+a.accountId+(a.pending?'p':'')+(a.disabled?'d':'')+(state.notes[a.aliasAddress]?'n':'')).join(',');
-  if(key===_lastListKey)return;
-  _lastListKey=key;
   let html='';
   let currentLetter='';
   state.filteredAliases.forEach(a=>{
@@ -993,7 +988,6 @@ function removeAccount(id){
   delete state.ovhZimbraPlatformIds[id];
   delete state.ovhZimbraAccountIds[id];
   if(state.credentials&&state.credentials.perAccount)delete state.credentials.perAccount[id];
-  _lastListKey='';
   saveServerState();
   saveAccountCredentials();
   renderAccountList();
@@ -2008,7 +2002,6 @@ document.getElementById('btn-save-note').addEventListener('click',async()=>{
   else if(_editNoteAlias.provider==='addy')
     addyUpdateNote(_editNoteAlias,note).catch(()=>{});
   closeEditNote();
-  _lastListKey='';
   applyFilter();render();
   await saveNotes();
 });
