@@ -66,51 +66,21 @@ Data is persisted in `app/json/` on the server:
 
 ### Docker with Portainer (recommended)
 
-1. Generate a secret key:
-   ```bash
-   openssl rand -hex 32
-   ```
-
-2. Clone the repo on your Docker host:
-   ```bash
-   git clone https://github.com/Kitround/Aliaser.git ~/aliaser
-   ```
-
-3. Build the image:
-   ```bash
-   docker build -f ~/aliaser/docker/Dockerfile -t aliaser:latest ~/aliaser
-   ```
-
-4. In Portainer → Stacks → Add stack → Web editor:
+1. In Portainer → Stacks → Add stack → Web editor:
    ```yaml
    services:
      aliaser:
-       image: aliaser:latest
-       pull_policy: never
+       image: sixtyfold5687/aliaser
+       restart: unless-stopped
        ports:
          - "8090:80"
        volumes:
          - ~/aliaser/app/json:/var/www/html/json
        environment:
          ALIASER_SECRET_KEY: "your_key_here"
-       restart: unless-stopped
    ```
 
-5. Open `http://YOUR_HOST:8090` and add your accounts from Settings.
-
-### Docker (standalone)
-
-1. Generate a secret key:
-   ```bash
-   openssl rand -hex 32
-   ```
-
-2. Set the key and start:
-   ```bash
-   ALIASER_SECRET_KEY=your_key docker compose up -d
-   ```
-
-3. Open `http://localhost:8090` and add your accounts from Settings.
+2. Open `http://YOUR_HOST:8090` and add your accounts from Settings.
 
 ### Manual (nginx / Apache + PHP 8.2+)
 
