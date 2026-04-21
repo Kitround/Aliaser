@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# Sensitive data — never bake into image (mounted as volume at runtime)
+app/json/credentials.json
+app/json/secret.key
+app/json/state.json
+app/json/notes.json
+app/json/addy-contacts.json
+
+# Extensions (not served by the app)
+extensions/
+
+# macOS
+.DS_Store
+
+# Docker env
+.env
+docker/.env
+
+# Docs
+README.md
+CLAUDE.md
+aliaser_docker.sh

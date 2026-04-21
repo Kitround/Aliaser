@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Aliaser</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="p-top">
+  <!-- Header -->
+  <div class="p-header">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 821.57 649" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#6c63ff" d="M803.59,0H161.62c-9.93,0-17.98,8.05-17.98,17.98v472.04c0,9.93,8.05,17.98,17.98,17.98h641.97c9.93,0,17.98-8.05,17.98-17.98V17.98c0-9.93-8.05-17.98-17.98-17.98ZM483.5,304.84L214.63,35.96h537.74l-268.87,268.87ZM377.51,249.71l-197.91,197.91V51.8l197.91,197.91ZM402.95,275.14l67.84,67.84c3.37,3.37,7.95,5.27,12.72,5.27s9.34-1.89,12.72-5.27l66.2-66.2,195.25,195.25H206.05l196.89-196.9ZM587.84,251.36l197.76-197.76v395.52l-197.76-197.76Z"/>
+        <path fill="rgba(108,99,255,.55)" d="M610,580H91c-11.05,0-20-8.95-20-20V93c0-11.05,8.95-20,20-20s20,8.95,20,20v447h499c11.05,0,20,8.95,20,20s-8.95,20-20,20Z"/>
+        <path fill="rgba(108,99,255,.3)" d="M398.97,649H20c-11.05,0-20-8.95-20-20v-341c0-11.05,8.95-20,20-20s20,8.95,20,20v321h358.97c11.05,0,20,8.95,20,20s-8.95,20-20,20Z"/>
+      </svg>
+      <span class="brand-name">Aliaser</span>
+    </div>
+    <span class="topbar-count" id="popup-alias-count"></span>
+    <button class="p-dashboard" id="btn-dashboard">
+      Dashboard
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+        <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Create -->
+  <div class="p-create" id="p-create-section">
+    <div class="p-pills-label">Account</div>
+    <div class="p-pills" id="p-pills"></div>
+
+    <div id="p-name-wrap">
+      <div class="p-field-label">Alias name</div>
+      <div class="p-name-row">
+        <input id="p-name" class="p-input" type="text" placeholder="e.g. shopping" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+        <button class="p-rand-btn" id="p-rand-btn" title="Random name">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+            <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- SL suffix selector (visible only for SL accounts) -->
+    <div class="p-suffix-wrap" id="p-suffix-wrap">
+      <div class="p-suffix-label">Suffix</div>
+      <div class="p-suffix-chips" id="p-suffix-chips"></div>
+    </div>
+
+    <div class="p-preview" id="p-preview"></div>
+
+    <button class="p-create-btn" id="p-create-btn" disabled>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      Create &amp; copy alias
+    </button>
+  </div>
+
+  <!-- Search -->
+  <div class="p-search-wrap">
+    <svg class="p-search-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+    <input id="p-search" class="p-search" type="text" placeholder="Find aliases…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+  </div>
+</div>
+
+<!-- Scrollable alias list -->
+<div class="p-list" id="p-list">
+  <div class="p-state"><div class="p-spinner"></div></div>
+</div>
+
+<!-- Contacts panel -->
+<div class="contacts-panel" id="contacts-panel">
+  <div class="contacts-header">
+    <div class="contacts-title">
+      <span class="contacts-label" id="contacts-alias-label"></span>
+    </div>
+    <button class="contacts-close" id="contacts-close">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+  <div class="contacts-list" id="contacts-list">
+    <div class="contacts-state"><div class="p-spinner"></div></div>
+  </div>
+  <div class="contacts-footer">
+    <input id="contacts-new-email" class="p-input" type="email" placeholder="sender@example.com" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <button class="contacts-add-btn" id="contacts-add-btn">Add</button>
+  </div>
+</div>
+
+<!-- Error banner -->
+<div class="error-banner" id="error-banner">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+  </svg>
+  <span id="error-text"></span>
+</div>
+
+<!-- Copy toast -->
+<div class="copy-toast-global" id="copy-toast-global">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+  <span id="copy-toast-text">Copied</span>
+</div>
+
+<!-- Setup overlay -->
+<div class="setup-overlay" id="setup-overlay">
+  <div class="setup-title">Welcome to Aliaser</div>
+  <div class="setup-sub">Enter the URL of your Aliaser server to get started.</div>
+  <div>
+    <div class="setup-lbl">Server URL</div>
+    <input id="setup-url" class="p-input" type="text" placeholder="http://192.168.1.10:8080" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+  </div>
+  <button class="p-create-btn" id="setup-save">Connect</button>
+  <div class="setup-hint">Local only? Default: <code style="font-family:var(--mono)">http://localhost:8080</code></div>
+</div>
+
+<script src="config.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>
