@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Sensitive data — never commit
+app/json/credentials.json
+app/json/secret.key
+app/json/state.json
+app/json/notes.json
+app/json/addy-contacts.json
+
+# Docker env
+.env
+docker/.env
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
