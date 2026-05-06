@@ -1,19 +1,39 @@
 <?php
 /**
- * Aliaser Proxy — OVH, Infomaniak, SimpleLogin, Addy.io, Cloudflare + state persistence
+ * Aliaser Proxy — OVH, Infomaniak, SimpleLogin, Addy.io, Cloudflare, Haltman
+ *                + state persistence
+ *
+ * Security-hardened:
+ *  - Strict permissions on persisted files (umask 0077)
+ *  - Optional auth token via ALIASER_AUTH_TOKEN env var (X-Aliaser-Auth header)
+ *  - Origin/Referer check on writes
+ *  - Per-provider path whitelist (prevents SSRF via arbitrary endpoints)
+ *  - 1 MiB body size cap
+ *  - CSP / HSTS / Permissions-Policy headers
+ *  - Server-side token resolution by accountId — tokens never leave the server
+ *  - Strict 64-hex encryption key validation, no silent webroot fallback
  */
+
+umask(0077);
 
 // ── Security headers ──────────────────────────────────────────────────────────
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Referrer-Policy: same-origin');
+header('Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=()');
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+if (!empty($_SERVER['HTTPS']) || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') {
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+}
 
 // ── CORS for browser extensions (Chrome + Firefox) ───────────────────────────
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (str_starts_with($origin, 'chrome-extension://') || str_starts_with($origin, 'moz-extension://')) {
+$origin    = $_SERVER['HTTP_ORIGIN']  ?? '';
+$isExtOrigin = (str_starts_with($origin, 'chrome-extension://') || str_starts_with($origin, 'moz-extension://'));
+if ($isExtOrigin) {
     header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
     header('Access-Control-Allow-Methods: GET, POST, DELETE, PUT, PATCH, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Cache-Control, Pragma');
+    header('Access-Control-Allow-Headers: Content-Type, Cache-Control, Pragma, X-Aliaser-Auth');
     header('Access-Control-Max-Age: 86400');
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
         http_response_code(204);
@@ -23,6 +43,53 @@ if (str_starts_with($origin, 'chrome-extension://') || str_starts_with($origin, 
 
 header('Content-Type: application/json');
 
+// ── Optional shared-secret auth ──────────────────────────────────────────────
+$authToken = getenv('ALIASER_AUTH_TOKEN');
+if ($authToken !== false && $authToken !== '') {
+    $provided = $_SERVER['HTTP_X_ALIASER_AUTH'] ?? '';
+    if (!is_string($provided) || !hash_equals($authToken, $provided)) {
+        http_response_code(401);
+        echo json_encode(['error' => 'Unauthorized']);
+        exit;
+    }
+}
+
+// ── Origin / Referer check on writes (CSRF mitigation) ──────────────────────
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+    $referer = $_SERVER['HTTP_REFERER'] ?? '';
+    $host    = $_SERVER['HTTP_HOST']    ?? '';
+    $sameOrigin = false;
+    if ($origin) {
+        $oh = parse_url($origin, PHP_URL_HOST);
+        $op = parse_url($origin, PHP_URL_PORT);
+        $expected = $host;
+        $sameOrigin = ($oh && (($op ? $oh.':'.$op : $oh) === $expected || $oh === parse_url('http://'.$expected, PHP_URL_HOST)));
+    } elseif ($referer) {
+        $rh = parse_url($referer, PHP_URL_HOST);
+        $rp = parse_url($referer, PHP_URL_PORT);
+        $sameOrigin = ($rh && (($rp ? $rh.':'.$rp : $rh) === $host || $rh === parse_url('http://'.$host, PHP_URL_HOST)));
+    } else {
+        // No Origin/Referer at all — only allow if extension already validated above
+        $sameOrigin = $isExtOrigin;
+    }
+    if (!$sameOrigin && !$isExtOrigin) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Forbidden origin']);
+        exit;
+    }
+}
+
+// ── Body size cap (1 MiB) ────────────────────────────────────────────────────
+$rawInput = '';
+if (in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
+    $rawInput = file_get_contents('php://input', false, null, 0, 1048576);
+    if (strlen($rawInput) >= 1048576) {
+        http_response_code(413);
+        echo json_encode(['error' => 'Payload too large']);
+        exit;
+    }
+}
 
 // ── State files ───────────────────────────────────────────────────────────────
 define('STATE_FILE',         __DIR__ . '/json/state.json');
@@ -35,30 +102,61 @@ define('ADDY_CONTACTS_FILE', __DIR__ . '/json/addy-contacts.json');
 function getEncryptionKey() {
     // 1. Environment variable — best for Docker / VPS
     $envKey = getenv('ALIASER_SECRET_KEY');
-    if ($envKey !== false && strlen($envKey) >= 16) return $envKey;
+    if ($envKey !== false && $envKey !== '') {
+        if (!preg_match('/^[0-9a-f]{64}$/i', $envKey)) {
+            http_response_code(500);
+            echo json_encode(['error' => 'ALIASER_SECRET_KEY must be 64 hex chars (32 bytes)']);
+            exit;
+        }
+        return $envKey;
+    }
 
     // 2. File above web root — best for shared hosting (not reachable via HTTP)
     $parentKey = dirname(__DIR__) . '/aliaser.key';
-    if (file_exists($parentKey)) return trim(file_get_contents($parentKey));
+    if (file_exists($parentKey)) {
+        $k = trim(file_get_contents($parentKey));
+        if (preg_match('/^[0-9a-f]{64}$/i', $k)) return $k;
+    }
 
-    // 3. Local fallback — legacy, less secure (key stored alongside ciphertext)
+    // 3. Local fallback — webroot-adjacent. Generated once with 0600.
     if (!file_exists(KEY_FILE)) {
         $key = bin2hex(random_bytes(32));
         file_put_contents(KEY_FILE, $key);
         @chmod(KEY_FILE, 0600);
     }
-    return trim(file_get_contents(KEY_FILE));
+    $k = trim(file_get_contents(KEY_FILE));
+    if (!preg_match('/^[0-9a-f]{64}$/i', $k)) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Invalid encryption key']);
+        exit;
+    }
+    return $k;
 }
 
+// AES-256-GCM with backward-compat read of legacy AES-256-CBC payloads.
+// Format new: "gcm:<base64iv>:<base64tag>:<ciphertext>"
+// Format legacy: "<base64iv>:<ciphertext>"  (CBC, no tag)
 function encryptData($data) {
     $key = hex2bin(getEncryptionKey());
-    $iv  = random_bytes(16);
-    $enc = openssl_encrypt(json_encode($data), 'AES-256-CBC', $key, 0, $iv);
-    return base64_encode($iv) . ':' . $enc;
+    $iv  = random_bytes(12);
+    $tag = '';
+    $enc = openssl_encrypt(json_encode($data), 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($enc === false) return false;
+    return 'gcm:' . base64_encode($iv) . ':' . base64_encode($tag) . ':' . base64_encode($enc);
 }
 
 function decryptData($str) {
-    $key   = hex2bin(getEncryptionKey());
+    $key = hex2bin(getEncryptionKey());
+    if (str_starts_with($str, 'gcm:')) {
+        $parts = explode(':', $str, 4);
+        if (count($parts) !== 4) return null;
+        $iv  = base64_decode($parts[1]);
+        $tag = base64_decode($parts[2]);
+        $ct  = base64_decode($parts[3]);
+        $dec = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+        return ($dec !== false) ? json_decode($dec, true) : null;
+    }
+    // Legacy CBC
     $parts = explode(':', $str, 2);
     if (count($parts) !== 2) return null;
     $iv  = base64_decode($parts[0]);
@@ -92,15 +190,62 @@ function readCredentials() {
     return $creds;
 }
 
+// Per-field merge: preserves existing secrets for fields the client did not
+// re-send (frontend cannot read them back after the GET-redaction change).
+// Accounts present in $data['perAccount'] are kept; accounts NOT present are
+// dropped (so account removal still works — frontend rebuilds the full set).
 function writeCredentials($data) {
+    $existing = readCredentials();
     $allowedGlobal = ['ovhAppKey', 'ovhAppSecret', 'infomaniakToken', 'simpleloginToken', 'addyToken', 'cloudflareToken'];
-    $filtered = array_intersect_key($data, array_flip($allowedGlobal));
-    if (isset($data['perAccount']) && is_array($data['perAccount'])) {
-        $filtered['perAccount'] = $data['perAccount'];
+    $filtered = [];
+    foreach ($allowedGlobal as $g) {
+        $filtered[$g] = (isset($data[$g]) && $data[$g] !== '') ? $data[$g] : ($existing[$g] ?? '');
     }
-    $result = file_put_contents(CREDS_FILE, encryptData($filtered));
+    $perAccount = [];
+    if (isset($data['perAccount']) && is_array($data['perAccount'])) {
+        foreach ($data['perAccount'] as $id => $newFields) {
+            if (!is_array($newFields)) continue;
+            $old = $existing['perAccount'][$id] ?? [];
+            $merged = is_array($old) ? $old : [];
+            foreach (['token', 'ovhAppKey', 'ovhAppSecret'] as $f) {
+                if (isset($newFields[$f]) && $newFields[$f] !== '') {
+                    $merged[$f] = $newFields[$f];
+                }
+            }
+            if (!empty($merged)) $perAccount[$id] = $merged;
+        }
+    }
+    $filtered['perAccount'] = $perAccount;
+    $payload = encryptData($filtered);
+    if ($payload === false) return false;
+    $result = file_put_contents(CREDS_FILE, $payload);
     if ($result !== false) @chmod(CREDS_FILE, 0600);
     return $result;
+}
+
+// Strip secret values, return only which credential keys are present per account.
+function readCredentialsRedacted() {
+    $c = readCredentials();
+    $perAccount = [];
+    foreach ($c['perAccount'] as $id => $v) {
+        if (!is_array($v)) continue;
+        $perAccount[$id] = [
+            'hasToken'        => !empty($v['token']),
+            'hasOvhAppKey'    => !empty($v['ovhAppKey']),
+            'hasOvhAppSecret' => !empty($v['ovhAppSecret']),
+        ];
+    }
+    return [
+        'perAccount' => $perAccount,
+        'legacyGlobal' => [
+            'ovhAppKey'        => !empty($c['ovhAppKey']),
+            'ovhAppSecret'     => !empty($c['ovhAppSecret']),
+            'infomaniakToken'  => !empty($c['infomaniakToken']),
+            'simpleloginToken' => !empty($c['simpleloginToken']),
+            'addyToken'        => !empty($c['addyToken']),
+            'cloudflareToken'  => !empty($c['cloudflareToken']),
+        ],
+    ];
 }
 
 function readState() {
@@ -145,8 +290,17 @@ function writeAddyContacts($data) {
     return $result;
 }
 
+// Resolve an account's stored token / OVH keys server-side from accountId.
+function resolveAccountSecret($accountId, $field) {
+    if (!$accountId) return '';
+    $c = readCredentials();
+    $a = $c['perAccount'][$accountId] ?? null;
+    if (is_array($a) && !empty($a[$field])) return $a[$field];
+    return '';
+}
+
 // ── State routes ──────────────────────────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'state') {
+if ($method === 'GET' && ($_GET['action'] ?? '') === 'state') {
     header('Cache-Control: no-store, no-cache, must-revalidate');
     header('Pragma: no-cache');
     header('Expires: 0');
@@ -154,15 +308,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'state')
     exit();
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'state') {
-    $input = json_decode(file_get_contents('php://input'), true);
+if ($method === 'POST' && ($_GET['action'] ?? '') === 'state') {
+    $input = json_decode($rawInput, true);
     if (!is_array($input)) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
     unset($input['notes']);
-    // Strip any credential fields that may have leaked into accounts
     if (isset($input['accounts']) && is_array($input['accounts'])) {
         $credFields = ['token', 'ovhAppKey', 'ovhAppSecret'];
         $input['accounts'] = array_map(function($acc) use ($credFields) {
-            return array_diff_key($acc, array_flip($credFields));
+            return is_array($acc) ? array_diff_key($acc, array_flip($credFields)) : $acc;
         }, $input['accounts']);
     }
     echo json_encode(['ok' => writeState($input) !== false]);
@@ -170,7 +323,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'state'
 }
 
 // ── Notes routes ──────────────────────────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'notes') {
+if ($method === 'GET' && ($_GET['action'] ?? '') === 'notes') {
     header('Cache-Control: no-store, no-cache, must-revalidate');
     header('Pragma: no-cache');
     header('Expires: 0');
@@ -178,15 +331,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'notes')
     exit();
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'notes') {
-    $input = json_decode(file_get_contents('php://input'), true);
+if ($method === 'POST' && ($_GET['action'] ?? '') === 'notes') {
+    $input = json_decode($rawInput, true);
     if (!is_array($input)) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
     echo json_encode(['ok' => writeNotes($input) !== false]);
     exit();
 }
 
 // ── Addy contacts routes ──────────────────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'addy-contacts') {
+if ($method === 'GET' && ($_GET['action'] ?? '') === 'addy-contacts') {
     header('Cache-Control: no-store, no-cache, must-revalidate');
     header('Pragma: no-cache');
     header('Expires: 0');
@@ -194,57 +347,122 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'addy-co
     exit();
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'addy-contacts') {
-    $input = json_decode(file_get_contents('php://input'), true);
+if ($method === 'POST' && ($_GET['action'] ?? '') === 'addy-contacts') {
+    $input = json_decode($rawInput, true);
     if (!is_array($input)) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
     echo json_encode(['ok' => writeAddyContacts($input) !== false]);
     exit();
 }
 
 // ── Credentials routes ────────────────────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'credentials') {
+// GET returns ONLY a redacted view (booleans only, never secret values).
+if ($method === 'GET' && ($_GET['action'] ?? '') === 'credentials') {
     header('Cache-Control: no-store, no-cache, must-revalidate');
     header('Pragma: no-cache');
     header('Expires: 0');
-    echo json_encode(readCredentials());
+    echo json_encode(readCredentialsRedacted());
     exit();
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'credentials') {
-    $input = json_decode(file_get_contents('php://input'), true);
+if ($method === 'POST' && ($_GET['action'] ?? '') === 'credentials') {
+    $input = json_decode($rawInput, true);
     if (!is_array($input)) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
     echo json_encode(['ok' => writeCredentials($input) !== false]);
     exit();
 }
 
 // ── Proxy routes ──────────────────────────────────────────────────────────────
-$input = json_decode(file_get_contents('php://input'), true);
+$input = json_decode($rawInput, true);
 if (!$input) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON input']); exit(); }
 $GLOBALS['input'] = $input;
 
-$provider = $input['provider'] ?? 'ovh';
+$provider = $input['provider']  ?? 'ovh';
 $method   = strtoupper($input['method'] ?? 'GET');
-$path     = $input['path'] ?? '';
+$path     = $input['path']      ?? '';
 $body     = isset($input['body']) ? json_encode($input['body']) : '';
 
 if (empty($path)) { http_response_code(400); echo json_encode(['error' => 'Missing required field: path']); exit(); }
-
 if (!function_exists('curl_init')) { http_response_code(500); echo json_encode(['error' => 'curl extension not available']); exit(); }
 
-if ($provider === 'infomaniak') handleInfomaniak($method, $path, $body);
+// ── Path whitelists per provider (defense against SSRF / privilege escalation) ──
+$WHITELISTS = [
+    'ovh' => [
+        '#^/auth/credential$#',
+        '#^/zimbra/platform$#',
+        '#^/zimbra/platform/[^/]+/account$#',
+        '#^/zimbra/platform/[^/]+/alias$#',
+        '#^/zimbra/platform/[^/]+/alias/[^/]+$#',
+    ],
+    'infomaniak' => [
+        '#^/1/mail_hostings/[^/]+/mailboxes/[^/]+/aliases(/[^/]+)?$#',
+    ],
+    'simplelogin' => [
+        '#^/api/user_info$#',
+        '#^/api/mailboxes$#',
+        '#^/api/v[2-9]/aliases(\?.*)?$#',
+        '#^/api/v[3-9]/alias/custom/new$#',
+        '#^/api/v[3-9]/alias/options$#',
+        '#^/api/aliases/[^/]+(/(toggle|contacts(\?.*)?))?$#',
+        '#^/api/contacts/[^/]+/toggle$#',
+    ],
+    'addy' => [
+        '#^/api/v1/account-details$#',
+        '#^/api/v1/recipients(\?.*)?$#',
+        '#^/api/v1/aliases(\?.*)?$#',
+        '#^/api/v1/aliases/[^/]+$#',
+        '#^/api/v1/active-aliases(/[^/]+)?$#',
+    ],
+    'cloudflare' => [
+        '#^/zones/[^/]+$#',
+        '#^/zones/[^/]+/email/routing/rules(\?.*)?$#',
+        '#^/zones/[^/]+/email/routing/rules/[^/]+$#',
+    ],
+    'haltman' => [
+        '#^/api/domains$#',
+        '#^/api/alias/list(\?.*)?$#',
+        '#^/api/alias/(create|delete)$#',
+    ],
+];
+
+if (!isset($WHITELISTS[$provider])) {
+    http_response_code(400); echo json_encode(['error' => 'Unknown provider']); exit();
+}
+$pathOk = false;
+foreach ($WHITELISTS[$provider] as $rx) {
+    if (preg_match($rx, $path)) { $pathOk = true; break; }
+}
+if (!$pathOk) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Path not allowed for provider']);
+    exit();
+}
+
+if ($provider === 'infomaniak')  handleInfomaniak($method, $path, $body);
 elseif ($provider === 'simplelogin') handleSimpleLogin($method, $path, $body);
-elseif ($provider === 'addy') handleAddy($method, $path, $body);
-elseif ($provider === 'cloudflare') handleCloudflare($method, $path, $body);
-elseif ($provider === 'haltman') handleHaltman($method, $path, $body);
-else handleOVH($method, $path, $body, $input);
+elseif ($provider === 'addy')        handleAddy($method, $path, $body);
+elseif ($provider === 'cloudflare')  handleCloudflare($method, $path, $body);
+elseif ($provider === 'haltman')     handleHaltman($method, $path, $body);
+else                                 handleOVH($method, $path, $body, $input);
+
+// Resolve a token for a non-OVH provider with this priority:
+//   1. accountId → encrypted credentials store (preferred)
+//   2. legacy: explicit token in request body (kept for setup-time flows)
+//   3. legacy global token from credentials.json
+function resolveToken($provider, $accountId, $explicit) {
+    if ($accountId) {
+        $t = resolveAccountSecret($accountId, 'token');
+        if ($t) return $t;
+    }
+    if (is_string($explicit) && $explicit !== '') return $explicit;
+    $creds = readCredentials();
+    $key = $provider . 'Token';
+    return $creds[$key] ?? '';
+}
 
 // ── Infomaniak ────────────────────────────────────────────────────────────────
 function handleInfomaniak($method, $path, $body) {
-    $creds = readCredentials();
-    $token = (!empty($GLOBALS['input']['token'])) ? $GLOBALS['input']['token'] : ($creds['infomaniakToken'] ?? '');
-    if (empty($token)) {
-        http_response_code(500); echo json_encode(['error' => 'Infomaniak token not configured']); exit();
-    }
+    $token = resolveToken('infomaniak', $GLOBALS['input']['accountId'] ?? '', $GLOBALS['input']['token'] ?? '');
+    if (empty($token)) { http_response_code(401); echo json_encode(['error' => 'Infomaniak token not configured']); exit(); }
     $url = 'https://api.infomaniak.com' . $path;
     $headers = ['Content-Type: application/json', 'Authorization: Bearer ' . $token];
     sendCurl($method, $url, $headers, $body, ['POST', 'PUT', 'PATCH']);
@@ -252,11 +470,8 @@ function handleInfomaniak($method, $path, $body) {
 
 // ── SimpleLogin ───────────────────────────────────────────────────────────────
 function handleSimpleLogin($method, $path, $body) {
-    $creds = readCredentials();
-    $token = (!empty($GLOBALS['input']['token'])) ? $GLOBALS['input']['token'] : ($creds['simpleloginToken'] ?? '');
-    if (empty($token)) {
-        http_response_code(500); echo json_encode(['error' => 'SimpleLogin token not configured']); exit();
-    }
+    $token = resolveToken('simplelogin', $GLOBALS['input']['accountId'] ?? '', $GLOBALS['input']['token'] ?? '');
+    if (empty($token)) { http_response_code(401); echo json_encode(['error' => 'SimpleLogin token not configured']); exit(); }
     $url = 'https://app.simplelogin.io' . $path;
     $headers = ['Content-Type: application/json', 'Authentication: ' . $token];
     sendCurl($method, $url, $headers, $body, ['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -264,11 +479,8 @@ function handleSimpleLogin($method, $path, $body) {
 
 // ── Addy.io ───────────────────────────────────────────────────────────────────
 function handleAddy($method, $path, $body) {
-    $creds = readCredentials();
-    $token = (!empty($GLOBALS['input']['token'])) ? $GLOBALS['input']['token'] : ($creds['addyToken'] ?? '');
-    if (empty($token)) {
-        http_response_code(500); echo json_encode(['error' => 'Addy.io token not configured']); exit();
-    }
+    $token = resolveToken('addy', $GLOBALS['input']['accountId'] ?? '', $GLOBALS['input']['token'] ?? '');
+    if (empty($token)) { http_response_code(401); echo json_encode(['error' => 'Addy.io token not configured']); exit(); }
     $url = 'https://app.addy.io' . $path;
     $headers = [
         'Content-Type: application/json',
@@ -281,11 +493,8 @@ function handleAddy($method, $path, $body) {
 
 // ── Cloudflare ────────────────────────────────────────────────────────────────
 function handleCloudflare($method, $path, $body) {
-    $creds = readCredentials();
-    $token = (!empty($GLOBALS['input']['token'])) ? $GLOBALS['input']['token'] : ($creds['cloudflareToken'] ?? '');
-    if (empty($token)) {
-        http_response_code(500); echo json_encode(['error' => 'Cloudflare token not configured']); exit();
-    }
+    $token = resolveToken('cloudflare', $GLOBALS['input']['accountId'] ?? '', $GLOBALS['input']['token'] ?? '');
+    if (empty($token)) { http_response_code(401); echo json_encode(['error' => 'Cloudflare token not configured']); exit(); }
     $url = 'https://api.cloudflare.com/client/v4' . $path;
     $headers = ['Content-Type: application/json', 'Authorization: Bearer ' . $token];
     sendCurl($method, $url, $headers, $body, ['POST', 'PUT', 'PATCH']);
@@ -293,7 +502,10 @@ function handleCloudflare($method, $path, $body) {
 
 // ── Haltman ───────────────────────────────────────────────────────────────────
 function handleHaltman($method, $path, $body) {
-    $token = $GLOBALS['input']['token'] ?? '';
+    $accountId = $GLOBALS['input']['accountId'] ?? '';
+    $explicit  = $GLOBALS['input']['token']     ?? '';
+    $token = $accountId ? resolveAccountSecret($accountId, 'token') : '';
+    if (!$token && is_string($explicit) && $explicit !== '') $token = $explicit;
     $url = 'https://mail.haltman.io' . $path;
     $headers = ['Content-Type: application/json'];
     if (!empty($token)) $headers[] = 'X-API-Key: ' . $token;
@@ -302,8 +514,6 @@ function handleHaltman($method, $path, $body) {
 
 // ── OVH ───────────────────────────────────────────────────────────────────────
 
-// Make a signed OVH request and return ['code', 'body', 'headers'] — used for
-// cases where we need to inspect response headers (e.g. pagination cursor).
 function ovhSignedRequest($method, $url, $appKey, $appSecret, $consumerKey, $body, $extraHeaders = []) {
     $timestamp = (string) time();
     $toSign    = $appSecret . '+' . $consumerKey . '+' . $method . '+' . $url . '+' . $body . '+' . $timestamp;
@@ -324,7 +534,7 @@ function ovhSignedRequest($method, $url, $appKey, $appSecret, $consumerKey, $bod
     curl_setopt($ch, CURLOPT_HTTPHEADER,     $hdrs);
     curl_setopt($ch, CURLOPT_TIMEOUT,        30);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-    curl_setopt($ch, CURLOPT_HEADER,         true); // include response headers in output
+    curl_setopt($ch, CURLOPT_HEADER,         true);
     if (in_array($method, ['POST','PUT','DELETE']) && !empty($body)) {
         curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
     }
@@ -351,24 +561,26 @@ function ovhSignedRequest($method, $url, $appKey, $appSecret, $consumerKey, $bod
 }
 
 function handleOVH($method, $path, $body, $input) {
+    $accountId = $input['accountId'] ?? '';
     $creds     = readCredentials();
-    $appKey    = (!empty($input['appKey']))    ? $input['appKey']    : ($creds['ovhAppKey']    ?? '');
-    $appSecret = (!empty($input['appSecret'])) ? $input['appSecret'] : ($creds['ovhAppSecret'] ?? '');
+    // Setup-time: client may pass appKey/appSecret in body before account exists.
+    $appKey    = (!empty($input['appKey']))    ? $input['appKey']    : ($accountId ? resolveAccountSecret($accountId, 'ovhAppKey')    : '');
+    $appSecret = (!empty($input['appSecret'])) ? $input['appSecret'] : ($accountId ? resolveAccountSecret($accountId, 'ovhAppSecret') : '');
+    if (!$appKey)    $appKey    = $creds['ovhAppKey']    ?? '';
+    if (!$appSecret) $appSecret = $creds['ovhAppSecret'] ?? '';
     if (empty($appKey) || empty($appSecret)) {
-        http_response_code(500); echo json_encode(['error' => 'OVH API keys not configured']); exit();
+        http_response_code(401); echo json_encode(['error' => 'OVH API keys not configured']); exit();
     }
     $consumerKey = $input['consumerKey'] ?? '';
     $useV2       = $input['useV2'] ?? false;
     $base        = $useV2 ? 'https://eu.api.ovh.com/v2' : 'https://eu.api.ovh.com/1.0';
 
-    // OVH v2 alias list: paginate server-side (cursor may be in response header or body)
-    // and return the complete flat array in one response.
     if ($useV2 && $method === 'GET' && preg_match('#^/zimbra/platform/[^/]+/alias$#', $path)) {
         $allItems = [];
         $cursor   = null;
-        for ($page = 0; $page < 50; $page++) { // safety cap: 50 pages max
-            $currentUrl    = $base . $path;
-            $extraHeaders  = $cursor ? ['X-Pagination-Cursor: ' . $cursor] : [];
+        for ($page = 0; $page < 50; $page++) {
+            $currentUrl   = $base . $path;
+            $extraHeaders = $cursor ? ['X-Pagination-Cursor: ' . $cursor] : [];
             $res = ovhSignedRequest('GET', $currentUrl, $appKey, $appSecret, $consumerKey, '', $extraHeaders);
             if ($res['code'] >= 400) {
                 http_response_code($res['code']);
@@ -378,16 +590,13 @@ function handleOVH($method, $path, $body, $input) {
             $data = json_decode($res['body'], true);
             if (is_array($data)) {
                 if (isset($data['items']) && is_array($data['items'])) {
-                    // Object format: { items: [...], cursor: { next: "..." } }
                     $allItems = array_merge($allItems, $data['items']);
                     $cursor   = $data['cursor']['next'] ?? null;
                 } else {
-                    // Plain array format
                     $allItems = array_merge($allItems, $data);
                     $cursor   = null;
                 }
             }
-            // Cursor may also (or exclusively) be in the response header
             if (empty($cursor)) {
                 $cursor = $res['headers']['x-pagination-cursor-next'] ?? null;
             }

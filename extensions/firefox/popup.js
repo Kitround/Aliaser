@@ -94,10 +94,11 @@ async function loadPopupState() {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
-  const [sd, nd, cd] = await Promise.all([
+  // Credentials are no longer needed in the extension: tokens stay server-side
+  // and are resolved by accountId on each proxy call.
+  const [sd, nd] = await Promise.all([
     safeFetch(proxy + '?action=state'),
     safeFetch(proxy + '?action=notes').catch(() => ({})),
-    safeFetch(proxy + '?action=credentials').catch(() => ({})),
   ]);
 
   ps.accounts          = sd.accounts || [];
@@ -105,31 +106,9 @@ async function loadPopupState() {
   ps.zimbraPlatformIds = sd.zimbraPlatformIds || {};
   ps.disabledAliases   = sd.disabledAliases || [];
 
-  // Apply consumerKeys
   (sd.consumerKeys || []).forEach(({ id, key }) => {
     const acc = ps.accounts.find(a => a.id === id);
     if (acc) acc.consumerKey = key;
-  });
-
-  // Merge per-account credentials
-  const perAccount = cd?.perAccount || {};
-  ps.accounts.forEach(acc => {
-    const c = perAccount[acc.id] || {};
-    if (c.token      && !acc.token)      acc.token      = c.token;
-    if (c.ovhAppKey  && !acc.ovhAppKey)  acc.ovhAppKey  = c.ovhAppKey;
-    if (c.ovhAppSecret && !acc.ovhAppSecret) acc.ovhAppSecret = c.ovhAppSecret;
-  });
-
-  // Migrate legacy global credentials
-  const g = cd || {};
-  ps.accounts.forEach(acc => {
-    if (acc.provider === 'ovh') {
-      if (!acc.ovhAppKey    && g.ovhAppKey)    acc.ovhAppKey    = g.ovhAppKey;
-      if (!acc.ovhAppSecret && g.ovhAppSecret) acc.ovhAppSecret = g.ovhAppSecret;
-    } else if (acc.provider === 'infomaniak'  && !acc.token && g.infomaniakToken)  acc.token = g.infomaniakToken;
-    else if (acc.provider === 'simplelogin'   && !acc.token && g.simpleloginToken) acc.token = g.simpleloginToken;
-    else if (acc.provider === 'addy'          && !acc.token && g.addyToken)        acc.token = g.addyToken;
-    else if (acc.provider === 'cloudflare'    && !acc.token && g.cloudflareToken)  acc.token = g.cloudflareToken;
   });
 }
 
@@ -171,7 +150,7 @@ async function ovhCall(acc, method, path, body = null) {
   const useV2 = !path.startsWith('/auth/');
   const consumerKey = acc?.consumerKey || '';
   try {
-    return await pc('ovh', method, path, body, { consumerKey, useV2, appKey: acc?.ovhAppKey || '', appSecret: acc?.ovhAppSecret || '' });
+    return await pc('ovh', method, path, body, { consumerKey, useV2, accountId: acc?.id || '', appKey: acc?.ovhAppKey || '', appSecret: acc?.ovhAppSecret || '' });
   } catch (e) {
     if (e.message && (e.message.includes('NOT_GRANTED') || e.message.includes('INVALID_CREDENTIAL') || e.message.includes('not been granted'))) {
       if (acc) { acc.consumerKey = ''; await saveServerState(); }
@@ -247,7 +226,7 @@ async function ovhDeleteAlias(alias, acc) {
 
 // ── Infomaniak ────────────────────────────────────────────────────────────────
 async function ikCall(acc, method, path, body = null) {
-  return pc('infomaniak', method, path, body, { token: acc?.token || '' });
+  return pc('infomaniak', method, path, body, { accountId: acc?.id || '', token: acc?.token || '' });
 }
 
 async function ikFetchForAccount(acc) {
@@ -282,7 +261,7 @@ async function ikDeleteAlias(alias, acc) {
 
 // ── SimpleLogin ───────────────────────────────────────────────────────────────
 async function slCall(acc, method, path, body = null) {
-  return pc('simplelogin', method, path, body, { token: acc?.token || '' });
+  return pc('simplelogin', method, path, body, { accountId: acc?.id || '', token: acc?.token || '' });
 }
 
 async function slFetchForAccount(acc) {
@@ -392,7 +371,7 @@ async function slCreateContact(alias, email) {
 
 // ── Addy ──────────────────────────────────────────────────────────────────────
 async function addyCall(acc, method, path, body = null) {
-  return pc('addy', method, path, body, { token: acc?.token || '' });
+  return pc('addy', method, path, body, { accountId: acc?.id || '', token: acc?.token || '' });
 }
 
 async function addyFetchForAccount(acc) {
@@ -459,7 +438,7 @@ async function addyToggleAlias(alias, enable) {
 
 // ── Cloudflare ────────────────────────────────────────────────────────────────
 async function cfCall(acc, method, path, body = null) {
-  const data = await pc('cloudflare', method, path, body, { token: acc?.token || '' });
+  const data = await pc('cloudflare', method, path, body, { accountId: acc?.id || '', token: acc?.token || '' });
   if (data && typeof data === 'object' && data.success === false) {
     throw new Error(data.errors?.[0]?.message || 'Cloudflare API error');
   }

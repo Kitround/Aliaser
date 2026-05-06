@@ -113,7 +113,9 @@ async function saveCredentials(creds){
   await fetch(PROXY+'?action=credentials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(creds)});
 }
 
-// Save per-account tokens to encrypted credentials.json (never in state.json)
+// Save per-account tokens to encrypted credentials.json (never in state.json).
+// Always sends an entry per existing account (even empty) so the server-side
+// merge can preserve existing secrets that the frontend cannot read back.
 async function saveAccountCredentials(){
   const perAccount={};
   state.accounts.forEach(a=>{
@@ -121,50 +123,28 @@ async function saveAccountCredentials(){
     if(a.token)c.token=a.token;
     if(a.ovhAppKey)c.ovhAppKey=a.ovhAppKey;
     if(a.ovhAppSecret)c.ovhAppSecret=a.ovhAppSecret;
-    if(Object.keys(c).length)perAccount[a.id]=c;
+    perAccount[a.id]=c;
   });
   await saveCredentials({perAccount});
 }
 
-// Merge per-account credentials loaded from credentials.json back into accounts in memory
+// Tokens are no longer returned by GET /credentials (security hardening).
+// The server resolves them at request time using the accountId. The redacted
+// response contains only booleans (hasToken / hasOvhAppKey / hasOvhAppSecret)
+// which we mirror onto the account objects for UI status badges.
 function mergeCredentialsIntoAccounts(){
   const perAccount=(state.credentials&&state.credentials.perAccount)||{};
   state.accounts.forEach(a=>{
     const c=perAccount[a.id]||{};
-    if(c.token&&!a.token)a.token=c.token;
-    if(c.ovhAppKey&&!a.ovhAppKey)a.ovhAppKey=c.ovhAppKey;
-    if(c.ovhAppSecret&&!a.ovhAppSecret)a.ovhAppSecret=c.ovhAppSecret;
+    a._hasToken       = !!c.hasToken;
+    a._hasOvhAppKey   = !!c.hasOvhAppKey;
+    a._hasOvhAppSecret= !!c.hasOvhAppSecret;
   });
 }
 
-// Migrate legacy global credentials + any account tokens not yet in perAccount store
-// Returns true if a save is needed
-function migrateTokensIfNeeded(){
-  const c=state.credentials||{};
-  const perAccount=c.perAccount||{};
-  let changed=false;
-  state.accounts.forEach(a=>{
-    // Migrate from legacy global credentials
-    if(a.provider==='ovh'){
-      if(!a.ovhAppKey&&c.ovhAppKey){a.ovhAppKey=c.ovhAppKey;changed=true;}
-      if(!a.ovhAppSecret&&c.ovhAppSecret){a.ovhAppSecret=c.ovhAppSecret;changed=true;}
-    }else if(a.provider==='infomaniak'){
-      if(!a.token&&c.infomaniakToken){a.token=c.infomaniakToken;changed=true;}
-    }else if(a.provider==='simplelogin'){
-      if(!a.token&&c.simpleloginToken){a.token=c.simpleloginToken;changed=true;}
-    }else if(a.provider==='addy'){
-      if(!a.token&&c.addyToken){a.token=c.addyToken;changed=true;}
-    }else if(a.provider==='cloudflare'){
-      if(!a.token&&c.cloudflareToken){a.token=c.cloudflareToken;changed=true;}
-    }
-    // Detect accounts whose tokens are not yet stored in perAccount
-    const existing=perAccount[a.id]||{};
-    if((a.token&&!existing.token)||(a.ovhAppKey&&!existing.ovhAppKey)){
-      changed=true;
-    }
-  });
-  return changed;
-}
+// Migration is no longer needed — the server handles legacy credentials and
+// resolves them transparently. Kept as a no-op for callers' compatibility.
+function migrateTokensIfNeeded(){return false;}
 
 // ── Proxy call with retry ─────────────────────────────────────────────────────
 async function proxyCall(provider,method,path,body=null,extra={},retries=2){
@@ -195,7 +175,7 @@ async function ovhCall(acc,method,path,body=null){
   const useV2=!path.startsWith('/auth/');
   const consumerKey=getOvhConsumerKey(acc);
   try{
-    return await proxyCall('ovh',method,path,body,{consumerKey,useV2,appKey:acc?.ovhAppKey||'',appSecret:acc?.ovhAppSecret||''});
+    return await proxyCall('ovh',method,path,body,{consumerKey,useV2,accountId:acc?.id||'',appKey:acc?.ovhAppKey||'',appSecret:acc?.ovhAppSecret||''});
   }catch(e){
     if(e.message&&(e.message.includes('not been granted')||e.message.includes('NOT_GRANTED')||e.message.includes('INVALID_CREDENTIAL'))){
       if(acc){acc.consumerKey='';await saveServerState();}
@@ -296,7 +276,7 @@ function accForAlias(alias){return state.accounts.find(a=>a.id===alias.accountId
 
 // ── Infomaniak ────────────────────────────────────────────────────────────────
 async function ikCall(acc,method,path,body=null){
-  return proxyCall('infomaniak',method,path,body,{token:acc?.token||''});
+  return proxyCall('infomaniak',method,path,body,{accountId:acc?.id||'',token:acc?.token||''});
 }
 async function ikFetchForAccount(acc){
   const mailbox=acc.account.includes('@')?acc.account.split('@')[0]:acc.account;
@@ -328,7 +308,7 @@ async function ikDeleteAlias(alias,acc){
 
 // ── SimpleLogin ───────────────────────────────────────────────────────────────
 async function slCall(acc,method,path,body=null){
-  return proxyCall('simplelogin',method,path,body,{token:acc?.token||''});
+  return proxyCall('simplelogin',method,path,body,{accountId:acc?.id||'',token:acc?.token||''});
 }
 
 async function slFetchForAccount(acc){
@@ -447,7 +427,7 @@ async function slToggleContact(contactId){
 
 // ── Addy ───────────────────────────────────────────────────────────────────
 async function addyCall(acc,method,path,body=null){
-  return proxyCall('addy',method,path,body,{token:acc?.token||''});
+  return proxyCall('addy',method,path,body,{accountId:acc?.id||'',token:acc?.token||''});
 }
 
 async function addyFetchForAccount(acc){
@@ -530,7 +510,7 @@ async function addyUpdateNote(alias,note){
 
 // ── Cloudflare ────────────────────────────────────────────────────────────────
 async function cfCall(acc,method,path,body=null){
-  const data=await proxyCall('cloudflare',method,path,body,{token:acc?.token||''});
+  const data=await proxyCall('cloudflare',method,path,body,{accountId:acc?.id||'',token:acc?.token||''});
   // Cloudflare returns success:false with HTTP 200 for some errors
   if(data&&typeof data==='object'&&data.success===false){
     throw new Error(data.errors?.[0]?.message||'Cloudflare API error');
@@ -602,7 +582,7 @@ async function cfToggleAlias(alias,enable){
 
 // ── Haltman ───────────────────────────────────────────────────────────────────
 async function haltmanCall(acc,method,path,body=null){
-  return proxyCall('haltman',method,path,body,{token:acc?.token||''});
+  return proxyCall('haltman',method,path,body,{accountId:acc?.id||'',token:acc?.token||''});
 }
 
 async function haltmanFetchForAccount(acc){

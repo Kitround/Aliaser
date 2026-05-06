@@ -1,0 +1,13 @@
+# Block all direct HTTP access to persisted state and credentials.
+# Apache 2.4+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+# Apache 2.2 fallback
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>
+
+# Disable directory listing regardless of mod_authz availability.
+Options -Indexes
