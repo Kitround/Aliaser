@@ -1407,8 +1407,9 @@ function openEditAccount(accId){
     dot.className='status-dot '+(acc.consumerKey?'green':'orange');
     txt.textContent=acc.consumerKey?'Authenticated':'Not authenticated';
   }else{
-    dot.className='status-dot '+(acc.token?'green':'orange');
-    txt.textContent=acc.token?'Configured':'Not configured';
+    const configured=!!(acc.token||acc._hasToken);
+    dot.className='status-dot '+(configured?'green':'orange');
+    txt.textContent=configured?'Configured':'Not configured';
   }
 }
 document.getElementById('btn-cancel-edit-account').addEventListener('click',hideAddForms);
