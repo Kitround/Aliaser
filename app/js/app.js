@@ -627,37 +627,45 @@ async function haltmanDeleteAlias(alias){
 }
 
 // ── Unified fetch ─────────────────────────────────────────────────────────────
+// Progressive: each provider's results are merged and rendered as soon as they
+// arrive, so a slow or failing provider doesn't block the others.
 async function fetchAliases(){
   if(!state.accounts.length)return;
-  const tasks=state.accounts.map(acc=>{
-    if(acc.provider==='ovh')
-      return ovhFetchForAccount(acc).catch(e=>{console.error('OVH ('+acc.label+'):', e);showError('OVH ('+acc.label+'): '+e.message);return[];});
-    else if(acc.provider==='infomaniak')
-      return ikFetchForAccount(acc).catch(e=>{console.error('IK ('+acc.label+'):', e);showError('IK ('+acc.label+'): '+e.message);return[];});
-    else if(acc.provider==='addy')
-      return addyFetchForAccount(acc).catch(e=>{console.error('Addy ('+acc.label+'):', e);showError('Addy ('+acc.label+'): '+e.message);return[];});
-    else if(acc.provider==='cloudflare')
-      return cfFetchForAccount(acc).catch(e=>{console.error('Cloudflare ('+acc.label+'):', e);showError('Cloudflare ('+acc.label+'): '+e.message);return[];});
-    else if(acc.provider==='haltman')
-      return haltmanFetchForAccount(acc).catch(e=>{console.error('Haltman ('+acc.label+'):', e);showError('Haltman ('+acc.label+'): '+e.message);return[];});
-    else
-      return slFetchForAccount(acc).catch(e=>{console.error('SL ('+acc.label+'):', e);showError('SL ('+acc.label+'): '+e.message);return[];});
-  });
-  const results=await Promise.all(tasks);
-  const live=[].concat(...results);
-  // API-driven providers (SL, Addy, CF) manage disabled state via their APIs
-  const apiAccountIds=new Set(state.accounts.filter(a=>
-    a.provider==='simplelogin'||a.provider==='addy'||a.provider==='cloudflare'
-  ).map(a=>a.id));
-  const disabled=state.disabledAliases.filter(d=>
-    !apiAccountIds.has(d.accountId)&&
-    state.accounts.some(a=>a.id===d.accountId)&&
-    !live.some(l=>l.aliasAddress===d.aliasAddress&&l.accountId===d.accountId)
-  );
-  state.aliases=[...live,...disabled.map(d=>({...d,disabled:true}))]
-    .sort((a,b)=>a.aliasAddress.localeCompare(b.aliasAddress));
   state.dataLoaded=true;
-  applyFilter();
+  const fetchFor=acc=>{
+    if(acc.provider==='ovh')return ovhFetchForAccount(acc);
+    if(acc.provider==='infomaniak')return ikFetchForAccount(acc);
+    if(acc.provider==='addy')return addyFetchForAccount(acc);
+    if(acc.provider==='cloudflare')return cfFetchForAccount(acc);
+    if(acc.provider==='haltman')return haltmanFetchForAccount(acc);
+    return slFetchForAccount(acc);
+  };
+  const labelFor={ovh:'OVH',infomaniak:'IK',simplelogin:'SL',addy:'Addy',cloudflare:'Cloudflare',haltman:'Haltman'};
+  const apiProviders=new Set(['simplelogin','addy','cloudflare']);
+  // Drop aliases for accounts no longer in state.accounts
+  const validIds=new Set(state.accounts.map(a=>a.id));
+  state.aliases=state.aliases.filter(a=>validIds.has(a.accountId));
+  const tasks=state.accounts.map(acc=>
+    fetchFor(acc)
+      .then(list=>{
+        let next=state.aliases.filter(a=>a.accountId!==acc.id);
+        next=[...next,...list];
+        if(!apiProviders.has(acc.provider)){
+          const disabledForAcc=state.disabledAliases.filter(d=>
+            d.accountId===acc.id && !list.some(l=>l.aliasAddress===d.aliasAddress)
+          );
+          next=[...next,...disabledForAcc.map(d=>({...d,disabled:true}))];
+        }
+        state.aliases=next.sort((a,b)=>a.aliasAddress.localeCompare(b.aliasAddress));
+        applyFilter();render();
+      })
+      .catch(e=>{
+        const lbl=labelFor[acc.provider]||acc.provider;
+        console.error(lbl+' ('+acc.label+'):',e);
+        showError(lbl+' ('+acc.label+'): '+e.message);
+      })
+  );
+  await Promise.allSettled(tasks);
 }
 
 async function createAlias(aliasName,accountId,note=''){

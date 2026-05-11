@@ -483,30 +483,45 @@ async function cfToggleAlias(alias, enable) {
 }
 
 // ── Fetch all aliases ─────────────────────────────────────────────────────────
+// Progressive: each provider's results are merged and rendered as soon as they
+// arrive, so a slow or failing provider doesn't block the others.
 async function fetchAll() {
   setListHtml('<div class="p-state"><div class="p-spinner"></div></div>');
-  const results = await Promise.all(ps.accounts.map(acc => {
-    switch (acc.provider) {
-      case 'ovh':         return ovhFetchForAccount(acc).catch(e  => { showError('OVH (' + acc.label + '): ' + e.message); return []; });
-      case 'infomaniak':  return ikFetchForAccount(acc).catch(e   => { showError('IK (' + acc.label + '): ' + e.message);  return []; });
-      case 'simplelogin': return slFetchForAccount(acc).catch(e   => { showError('SL (' + acc.label + '): ' + e.message);  return []; });
-      case 'addy':        return addyFetchForAccount(acc).catch(e => { showError('Addy (' + acc.label + '): ' + e.message); return []; });
-      case 'cloudflare':  return cfFetchForAccount(acc).catch(e   => { showError('CF (' + acc.label + '): ' + e.message);  return []; });
-      default:            return [];
-    }
-  }));
-  // Merge fetched aliases with disabled ones not yet returned by the API
-  const live         = results.flat();
   const apiProviders = new Set(['simplelogin', 'addy', 'cloudflare']);
-  const disabled     = ps.disabledAliases.filter(d =>
-    !apiProviders.has(d.provider) &&
-    ps.accounts.some(a => a.id === d.accountId) &&
-    !live.some(l => l.aliasAddress === d.aliasAddress && l.accountId === d.accountId)
+  const labelFor     = { ovh: 'OVH', infomaniak: 'IK', simplelogin: 'SL', addy: 'Addy', cloudflare: 'CF' };
+  const fetchFor = acc => {
+    switch (acc.provider) {
+      case 'ovh':         return ovhFetchForAccount(acc);
+      case 'infomaniak':  return ikFetchForAccount(acc);
+      case 'simplelogin': return slFetchForAccount(acc);
+      case 'addy':        return addyFetchForAccount(acc);
+      case 'cloudflare':  return cfFetchForAccount(acc);
+      default:            return Promise.resolve([]);
+    }
+  };
+  ps.aliases = [];
+  const tasks = ps.accounts.map(acc =>
+    fetchFor(acc)
+      .then(list => {
+        let next = ps.aliases.filter(a => a.accountId !== acc.id);
+        next = [...next, ...list];
+        if (!apiProviders.has(acc.provider)) {
+          const disabledForAcc = ps.disabledAliases.filter(d =>
+            d.accountId === acc.id && !list.some(l => l.aliasAddress === d.aliasAddress)
+          );
+          next = [...next, ...disabledForAcc.map(d => ({ ...d, disabled: true }))];
+        }
+        ps.aliases = next;
+        applyFilter();
+        renderList();
+        updateCount();
+      })
+      .catch(e => {
+        const lbl = labelFor[acc.provider] || acc.provider;
+        showError(lbl + ' (' + acc.label + '): ' + e.message);
+      })
   );
-  ps.aliases = [...live, ...disabled.map(d => ({ ...d, disabled: true }))];
-  applyFilter();
-  renderList();
-  updateCount();
+  await Promise.allSettled(tasks);
 }
 
 // ── Create alias ──────────────────────────────────────────────────────────────
