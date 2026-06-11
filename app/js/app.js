@@ -142,10 +142,6 @@ function mergeCredentialsIntoAccounts(){
   });
 }
 
-// Migration is no longer needed — the server handles legacy credentials and
-// resolves them transparently. Kept as a no-op for callers' compatibility.
-function migrateTokensIfNeeded(){return false;}
-
 // ── Proxy call with retry ─────────────────────────────────────────────────────
 async function proxyCall(provider,method,path,body=null,extra={},retries=2){
   const payload={provider,method,path,...extra};
@@ -1951,9 +1947,6 @@ document.addEventListener('touchstart',()=>{},{passive:true});
 
 Promise.all([loadServerState(),loadNotes(),loadCredentials(),loadAddyContacts()]).then(async()=>{
   mergeCredentialsIntoAccounts();
-  if(migrateTokensIfNeeded()){
-    await Promise.all([saveAccountCredentials(),saveServerState()]);
-  }
   render();
   if(canAddAlias())await loadAliases();
 });

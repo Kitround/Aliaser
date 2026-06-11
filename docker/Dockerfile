@@ -9,6 +9,13 @@ RUN apt-get update \
 
 RUN a2enmod rewrite
 
+# Deny all HTTP access to the persisted state/credentials directory.
+# Enforced at the Apache config level (the image ships AllowOverride None, so a
+# .htaccess inside json/ would be ignored).
+RUN printf '<Directory /var/www/html/json>\n    Require all denied\n    Options -Indexes\n</Directory>\n' \
+    > /etc/apache2/conf-available/aliaser-json.conf \
+ && a2enconf aliaser-json
+
 # Copy application files from app/ subfolder
 COPY app/ /var/www/html/
 
