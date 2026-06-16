@@ -155,6 +155,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 /* ── Account list in settings ── */
 .account-list{display:flex !important;flex-direction:column !important;gap:6px}
 .account-item{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;display:flex;align-items:center;gap:2px}
+.account-item-warn{border-color:rgba(224,144,64,.45)}
+.account-warn{color:var(--orange);flex-shrink:0;width:30px;height:30px;cursor:help}
+.account-warn:hover{background:rgba(224,144,64,.1);border-color:rgba(224,144,64,.25);color:var(--orange)}
 .account-item-info{flex:1;min-width:0;margin-right:6px}
 .account-item-name{font-size:.8rem;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .account-item-sub{font-size:.7rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}

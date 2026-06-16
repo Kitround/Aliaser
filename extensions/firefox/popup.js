@@ -490,6 +490,21 @@ async function cfToggleAlias(alias, enable) {
   await cfCall(acc, 'PUT', '/zones/' + acc.zoneId + '/email/routing/rules/' + alias.id, body);
 }
 
+// Turn a raw provider/proxy error into a human-readable explanation.
+function describeProviderError(e) {
+  const msg = (e && e.message) || String(e || '');
+  const m = msg.match(/\(HTTP (\d+)\)/);
+  const code = m ? parseInt(m[1], 10) : 0;
+  if (/re-authenticate|session expired/i.test(msg)) return msg;
+  if (code >= 500 || (code === 0 && /network error/i.test(msg)))
+    return "The provider's service is currently unavailable — this is on their side, not your configuration. Try again later.";
+  if (code === 429) return "Too many requests — the provider is rate-limiting. Wait a moment and refresh.";
+  if (code === 401 || code === 403) return "Authentication failed — check this account's API token or keys.";
+  if (code === 404) return "Not found — the account configuration may be incorrect.";
+  if (/network error/i.test(msg)) return "Could not reach the provider — check network connectivity.";
+  return msg;
+}
+
 // ── Fetch all aliases ─────────────────────────────────────────────────────────
 // Progressive: each provider's results are merged and rendered as soon as they
 // arrive, so a slow or failing provider doesn't block the others.
@@ -526,7 +541,7 @@ async function fetchAll() {
       })
       .catch(e => {
         const lbl = labelFor[acc.provider] || acc.provider;
-        showError(lbl + ' (' + acc.label + '): ' + e.message);
+        showError(lbl + ' (' + acc.label + '): ' + describeProviderError(e));
       })
   );
   await Promise.allSettled(tasks);

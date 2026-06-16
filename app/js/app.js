@@ -17,6 +17,7 @@ const state={
   disabledAliases:[],
   credentials:{},
   addyContacts:{},// { aliasId: [{email, reverse}] }
+  accountErrors:{},// { accountId: "human-readable problem" } — last fetch failure
 };
 const PROXY='./proxy.php';
 
@@ -622,6 +623,27 @@ async function haltmanDeleteAlias(alias){
   await haltmanCall(accForAlias(alias),'POST','/api/alias/delete',{alias:alias.aliasAddress});
 }
 
+// Turn a raw provider/proxy error into a human-readable explanation.
+// The HTTP status (appended as "(HTTP nnn)" by proxyCall) tells us the source.
+function describeProviderError(e){
+  const msg=(e&&e.message)||String(e||'');
+  const m=msg.match(/\(HTTP (\d+)\)/);
+  const code=m?parseInt(m[1],10):0;
+  // Already-friendly messages thrown upstream (e.g. OVH session expired)
+  if(/re-authenticate|session expired/i.test(msg))return msg;
+  if(code>=500||code===0&&/network error/i.test(msg))
+    return"The provider's service is currently unavailable — this is on their side, not your configuration. Try again later.";
+  if(code===429)
+    return"Too many requests — the provider is rate-limiting. Wait a moment and refresh.";
+  if(code===401||code===403)
+    return"Authentication failed — check this account's API token or keys in its settings.";
+  if(code===404)
+    return"Not found — the account configuration (hosting ID, zone, domain…) may be incorrect.";
+  if(/network error/i.test(msg))
+    return"Could not reach the provider — check the server's network connectivity.";
+  return msg;
+}
+
 // ── Unified fetch ─────────────────────────────────────────────────────────────
 // Progressive: each provider's results are merged and rendered as soon as they
 // arrive, so a slow or failing provider doesn't block the others.
@@ -644,6 +666,7 @@ async function fetchAliases(){
   const tasks=state.accounts.map(acc=>
     fetchFor(acc)
       .then(list=>{
+        delete state.accountErrors[acc.id];
         let next=state.aliases.filter(a=>a.accountId!==acc.id);
         next=[...next,...list];
         if(!apiProviders.has(acc.provider)){
@@ -657,8 +680,10 @@ async function fetchAliases(){
       })
       .catch(e=>{
         const lbl=labelFor[acc.provider]||acc.provider;
+        const friendly=describeProviderError(e);
         console.error(lbl+' ('+acc.label+'):',e);
-        showError(lbl+' ('+acc.label+'): '+e.message);
+        state.accountErrors[acc.id]=friendly;
+        showError(lbl+' ('+acc.label+'): '+friendly);
       })
   );
   await Promise.allSettled(tasks);
@@ -926,7 +951,15 @@ function renderAccountList(){
         ?'<span class="account-item-badge badge-tier-free">Free</span>'
         :'<span class="account-item-badge badge-tier-premium">Premium</span>';
     }
-    return`<div class="account-item">
+    const err=state.accountErrors[acc.id];
+    const warnIcon=err?`<button class="icon-btn account-warn" data-account-id="${esc(acc.id)}" title="${esc(err)}">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+      </button>`:'';
+    return`<div class="account-item${err?' account-item-warn':''}">
+      ${warnIcon}
       <div class="account-item-info">
         <div class="account-item-name">${esc(displayName)}</div>
         <span class="account-item-badge badge-${cls}">${lbl}</span>${tierBadge}
@@ -965,6 +998,7 @@ function removeAccount(id){
   state.disabledAliases=state.disabledAliases.filter(a=>a.accountId!==id);
   delete state.ovhZimbraPlatformIds[id];
   delete state.ovhZimbraAccountIds[id];
+  delete state.accountErrors[id];
   if(state.credentials&&state.credentials.perAccount)delete state.credentials.perAccount[id];
   saveServerState();
   saveAccountCredentials();
@@ -973,6 +1007,8 @@ function removeAccount(id){
 }
 
 document.getElementById('account-list').addEventListener('click',e=>{
+  const warnBtn=e.target.closest('.account-warn');
+  if(warnBtn){const id=warnBtn.dataset.accountId;const msg=state.accountErrors[id];if(msg)showError(msg);return;}
   const removeBtn=e.target.closest('.remove-account-btn');
   if(removeBtn){const id=removeBtn.dataset.accountId;if(id)removeAccount(id);return;}
   const defaultBtn=e.target.closest('.default-btn');
