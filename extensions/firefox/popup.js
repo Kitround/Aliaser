@@ -75,7 +75,7 @@ async function pc(provider, method, path, body = null, extra = {}, retries = 2) 
       const res  = await fetch(getProxy(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const text = await res.text();
       let data; try { data = JSON.parse(text); } catch { data = text || null; }
-      if (!res.ok) throw new Error(data?.message || data?.error || 'HTTP ' + res.status);
+      if (!res.ok) { const m = data?.message || data?.error; throw new Error(m ? m + ' (HTTP ' + res.status + ')' : 'HTTP ' + res.status); }
       return data;
     } catch (e) {
       const isNet = e instanceof TypeError || e.message === 'Failed to fetch' || e.message.includes('NetworkError');

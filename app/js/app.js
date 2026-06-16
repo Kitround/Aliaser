@@ -150,7 +150,7 @@ async function proxyCall(provider,method,path,body=null,extra={},retries=2){
     try{
       const res=await fetch(PROXY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const text=await res.text();let data;try{data=JSON.parse(text)}catch{data=text||null}
-      if(!res.ok)throw new Error(data?.message||data?.error||'HTTP '+res.status);
+      if(!res.ok){const m=data?.message||data?.error;throw new Error(m?m+' (HTTP '+res.status+')':'HTTP '+res.status);}
       return data;
     }catch(e){
       const isNetworkErr=e instanceof TypeError||e.message==='Failed to fetch'||e.message.includes('NetworkError');
