@@ -39,7 +39,9 @@ async function loadServerState(){
     });
   }catch(e){
     console.error('Failed to load server state:',e);
-    state.accounts=[];
+    // Offline/unreachable: keep cached accounts (if any) so the cached alias
+    // list stays usable instead of collapsing to "no accounts configured".
+    if(!state.accounts.length)state.accounts=[];
   }
 }
 
@@ -1002,6 +1004,7 @@ function removeAccount(id){
   if(state.credentials&&state.credentials.perAccount)delete state.credentials.perAccount[id];
   saveServerState();
   saveAccountCredentials();
+  if(state.accounts.length)saveCachedAliases();else clearCachedAliases();
   renderAccountList();
   render();
 }
@@ -1140,12 +1143,50 @@ function scrollToAndHighlightAlias(aliasAddress){
   card.classList.add('alias-card-new');
 }
 
+// ── Alias cache (stale-while-revalidate) ──────────────────────────────────────
+// Caches the displayed alias list + notes in localStorage so the last-known
+// list paints instantly on launch (no spinner / blank page on slow networks),
+// then gets replaced by the live fetch. Never stores tokens or credentials.
+const ALIAS_CACHE_KEY='aliaser_alias_cache_v1';
+function loadCachedAliases(){
+  try{
+    const raw=localStorage.getItem(ALIAS_CACHE_KEY);
+    if(!raw)return false;
+    const data=JSON.parse(raw);
+    // Need both accounts and aliases so canAddAlias() is true and the list renders.
+    if(!data||!Array.isArray(data.accounts)||!data.accounts.length||!Array.isArray(data.aliases)||!data.aliases.length)return false;
+    state.accounts=data.accounts;
+    state.aliases=data.aliases;
+    if(data.notes&&typeof data.notes==='object'&&!Array.isArray(data.notes))state.notes=data.notes;
+    state.dataLoaded=true;
+    applyFilter();
+    return true;
+  }catch{return false;}
+}
+function saveCachedAliases(){
+  try{
+    // Strip every credential field — only non-secret display data is cached.
+    const accounts=state.accounts.map(({consumerKey:_ck,token:_t,ovhAppKey:_k,ovhAppSecret:_s,...rest})=>rest);
+    const aliases=state.aliases.filter(a=>!a.pending);
+    localStorage.setItem(ALIAS_CACHE_KEY,JSON.stringify({accounts,aliases,notes:state.notes}));
+  }catch{}
+}
+function clearCachedAliases(){
+  try{localStorage.removeItem(ALIAS_CACHE_KEY);}catch{}
+}
+
 async function loadAliases(){
   if(!canAddAlias())return;
   state.isLoading=true;
   setRefreshSpin(true);hideError();
   try{await fetchAliases()}catch(e){showError(e.message)}
-  finally{state.isLoading=false;setRefreshSpin(false);render();}
+  finally{
+    state.isLoading=false;setRefreshSpin(false);render();
+    // Persist for instant load next time — but keep the previous cache if every
+    // provider failed (e.g. offline), so we don't wipe usable data.
+    const allFailed=state.accounts.length>0&&state.accounts.every(a=>state.accountErrors[a.id]);
+    if(!allFailed)saveCachedAliases();
+  }
 }
 
 function setThemeColor(dark){
@@ -1985,9 +2026,11 @@ document.getElementById('search-input').addEventListener('input',e=>{
 // Enable :active states on iOS Safari (requires at least one touchstart listener on document)
 document.addEventListener('touchstart',()=>{},{passive:true});
 
-// Paint the loading spinner immediately, before the first network call, so a
-// slow/offline connection never shows a blank page (matters most in PWA/mobile).
-state.isLoading=true;
+// Paint instantly: show the last cached alias list if we have one (stale-while-
+// revalidate), otherwise the loading spinner. Avoids a blank page on slow/offline
+// connections — matters most in PWA/mobile. The live fetch replaces it below.
+const _hadCache=loadCachedAliases();
+state.isLoading=!_hadCache;
 render();
 Promise.all([loadServerState(),loadNotes(),loadCredentials(),loadAddyContacts()]).then(async()=>{
   mergeCredentialsIntoAccounts();
@@ -1995,7 +2038,10 @@ Promise.all([loadServerState(),loadNotes(),loadCredentials(),loadAddyContacts()]
     render();
     await loadAliases();
   }else{
+    state.aliases=[];
+    applyFilter();
     state.isLoading=false;
     render();
+    clearCachedAliases();
   }
 }).catch(()=>{state.isLoading=false;render();});
