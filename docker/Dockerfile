@@ -7,7 +7,7 @@ RUN apt-get update \
     && docker-php-ext-install curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN a2enmod rewrite
+RUN a2enmod rewrite headers
 
 # Deny all HTTP access to the persisted state/credentials directory.
 # Enforced at the Apache config level (the image ships AllowOverride None, so a
@@ -15,6 +15,10 @@ RUN a2enmod rewrite
 RUN printf '<Directory /var/www/html/json>\n    Require all denied\n    Options -Indexes\n</Directory>\n' \
     > /etc/apache2/conf-available/aliaser-json.conf \
  && a2enconf aliaser-json
+
+# Security headers for every response (static HTML/CSS/JS included, not just PHP).
+COPY docker/security-headers.conf /etc/apache2/conf-available/aliaser-headers.conf
+RUN a2enconf aliaser-headers
 
 # Copy application files from app/ subfolder
 COPY app/ /var/www/html/
