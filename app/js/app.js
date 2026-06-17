@@ -1074,10 +1074,14 @@ function populateSlSuffixDropdown(acc){
 function setRefreshSpin(on){document.querySelectorAll('.refresh-icon').forEach(el=>el.classList.toggle('spin-anim',on))}
 function render(){
   const loading=state.isLoading,ready=canAddAlias();
+  // Show the spinner whenever we're loading and have nothing to display yet —
+  // covers cold start and slow/bad connections (blank page otherwise). A
+  // refresh with data already on screen keeps the list (progressive fetch).
+  const showLoading=loading&&state.filteredAliases.length===0;
   const empty=ready&&state.dataLoaded&&!loading&&state.filteredAliases.length===0;
-  document.getElementById('state-loading').classList.toggle('visible',loading&&!ready);
+  document.getElementById('state-loading').classList.toggle('visible',showLoading);
   document.getElementById('state-config').classList.toggle('visible',!loading&&!ready);
-  document.getElementById('state-empty').classList.toggle('visible',!loading&&empty);
+  document.getElementById('state-empty').classList.toggle('visible',!showLoading&&!loading&&empty);
   renderList();
   document.getElementById('btn-add').style.display=ready?'inline-flex':'none';
   document.getElementById('mob-add').style.display=ready?'flex':'none';
@@ -1981,8 +1985,17 @@ document.getElementById('search-input').addEventListener('input',e=>{
 // Enable :active states on iOS Safari (requires at least one touchstart listener on document)
 document.addEventListener('touchstart',()=>{},{passive:true});
 
+// Paint the loading spinner immediately, before the first network call, so a
+// slow/offline connection never shows a blank page (matters most in PWA/mobile).
+state.isLoading=true;
+render();
 Promise.all([loadServerState(),loadNotes(),loadCredentials(),loadAddyContacts()]).then(async()=>{
   mergeCredentialsIntoAccounts();
-  render();
-  if(canAddAlias())await loadAliases();
-});
+  if(canAddAlias()){
+    render();
+    await loadAliases();
+  }else{
+    state.isLoading=false;
+    render();
+  }
+}).catch(()=>{state.isLoading=false;render();});
