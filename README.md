@@ -17,6 +17,7 @@ This app is 100% vibe coded using Claude Code so use it with caution, only in lo
 | **SimpleLogin** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Addy.io** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Cloudflare** | ✅ | ✅ | ✅ | — | ✅ | — |
+| **Haltman** | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 
 ## Features
 
@@ -28,6 +29,7 @@ This app is 100% vibe coded using Claude Code so use it with caution, only in lo
 - Search across all aliases (address, target, note)
 - SimpleLogin & Addy.io contacts / reverse aliases management
 - Dark theme, responsive (mobile + desktop)
+- Installable PWA, with instant load from a cached alias list (stale-while-revalidate)
 - All data stored server-side, encrypted credentials
 
 ## Screenshots
@@ -52,14 +54,14 @@ app/
 extensions/
   chrome/           — Chrome extension (MV3)
   firefox/          — Firefox extension
-docker/             — Dockerfile, entrypoint
+docker/             — Dockerfile, entrypoint, Apache security-headers config
 docker-compose.yml
 ```
 
 Data is persisted in `app/json/` on the server:
 - `state.json` — accounts and settings
 - `notes.json` — alias notes
-- `credentials.json` — API tokens (AES-256-CBC encrypted)
+- `credentials.json` — API tokens (AES-256-GCM encrypted)
 - `addy-contacts.json` — Addy.io contacts cache
 
 ## Deployment
@@ -104,10 +106,13 @@ Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
 
 ## Security
 
-- API tokens are stored **encrypted** (AES-256-CBC) in `credentials.json` — never in plain text
+- API tokens are stored **encrypted** (AES-256-GCM) in `credentials.json` — never in plain text, and never returned to the browser (resolved server-side per request)
 - Tokens are never written to `state.json`
-- Security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`
-- No authentication layer — intended for **private/LAN/VPN** use only
+- Per-provider API path allowlist — the proxy can only reach the providers' alias endpoints, not arbitrary URLs
+- Direct HTTP access to the `json/` data directory is denied
+- Security headers on every response: `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`
+- Optional shared-secret auth via the `ALIASER_AUTH_TOKEN` env var (sent as the `X-Aliaser-Auth` header)
+- No built-in login UI — intended for **private/LAN/VPN** use only
 
 > ⚠️ Do not expose this app on the public internet without adding authentication (e.g. HTTP Basic Auth via nginx).
 
