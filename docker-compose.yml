@@ -1,6 +1,6 @@
 services:
   aliaser:
-    image: sixtyfold5687/aliaser:latest
+    image: kitround/aliaser:latest
     ports:
       - "8090:80"
     volumes:

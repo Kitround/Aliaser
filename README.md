@@ -70,7 +70,7 @@ Data is persisted in `app/json/` on the server:
    ```yaml
    services:
      aliaser:
-       image: sixtyfold5687/aliaser
+       image: kitround/aliaser
        restart: unless-stopped
        ports:
          - "8090:80"
