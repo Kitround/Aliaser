@@ -1037,16 +1037,23 @@ async function init() {
     if (nameWrap) nameWrap.style.display = isAddyFree ? 'none' : '';
 
     if (def.provider === 'simplelogin') {
-      await loadSlOptions(def);
-      populateSlSuffixSelect(def);
-      document.getElementById('p-suffix-field').style.display = '';
+      try {
+        await loadSlOptions(def);
+        populateSlSuffixSelect(def);
+        document.getElementById('p-suffix-field').style.display = '';
+      } catch (e) { /* provider hiccup shouldn't break the whole popup */ }
     }
 
     fillFromTab();
     fetchAll();
   } catch (e) {
-    showError('Cannot connect to server');
-    setListHtml('<div class="p-state">Could not connect to server.<br>Check the URL in Options.</div>');
+    const isAuth = /authorized|device token|HTTP 401/i.test(e.message || '');
+    showError(isAuth ? 'Sign-in required — set a device token' : 'Cannot connect to server');
+    const msg = isAuth
+      ? 'This server requires sign-in.<br>Paste a device token in Options.'
+      : 'Could not connect to server.<br>Check the URL in Options.';
+    setListHtml('<div class="p-state">' + msg + '<br><br><button id="p-open-options" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:.8rem;font-weight:500;cursor:pointer">Open Options</button></div>');
+    document.getElementById('p-open-options')?.addEventListener('click', () => chrome.runtime.openOptionsPage());
   }
 }
 

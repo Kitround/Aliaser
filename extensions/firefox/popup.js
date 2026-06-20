@@ -1105,9 +1105,11 @@ async function init() {
     if (nameWrap) nameWrap.style.display = isAddyFree ? 'none' : '';
 
     if (def.provider === 'simplelogin') {
-      await loadSlOptions(def);
-      populateSlSuffixSelect(def);
-      document.getElementById('p-suffix-field').style.display = '';
+      try {
+        await loadSlOptions(def);
+        populateSlSuffixSelect(def);
+        document.getElementById('p-suffix-field').style.display = '';
+      } catch (e) { /* provider hiccup shouldn't break the whole popup */ }
     }
 
     renderSuggestions();
@@ -1115,14 +1117,19 @@ async function init() {
     fetchAll();
   } catch (e) {
     const url = getProxy();
-    showError('Cannot connect to server');
+    const isAuth = /authorized|device token|HTTP 401/i.test(e.message || '');
+    showError(isAuth ? 'Sign-in required — set a device token' : 'Cannot connect to server');
+    const head = isAuth
+      ? 'This server requires sign-in. Paste a device token in Options.'
+      : 'Could not connect to server.';
     setListHtml(
-      '<div class="p-state">Could not connect to server.<br>' +
+      '<div class="p-state">' + head + '<br>' +
       '<span style="font-size:.7rem;color:var(--text-dim);word-break:break-all">' + esc(url) + '</span><br>' +
-      '<span style="font-size:.7rem;color:var(--text-dim)">' + esc(e.message || String(e)) + '</span><br>' +
-      'Check the URL in Options.' +
+      '<span style="font-size:.7rem;color:var(--text-dim)">' + esc(e.message || String(e)) + '</span><br><br>' +
+      '<button id="p-open-options" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:.8rem;font-weight:500;cursor:pointer">Open Options</button>' +
       '</div>'
     );
+    document.getElementById('p-open-options')?.addEventListener('click', () => browser.runtime.openOptionsPage());
   }
 }
 
