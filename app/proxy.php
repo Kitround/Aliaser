@@ -254,6 +254,69 @@ if (($_GET['action'] ?? '') === 'device-tokens') {
     }
 }
 
+// ── 2FA management (web session only) ─────────────────────────────────────────
+$AUTH_MGMT = ['auth-methods','passkeys','passkey-register-options','passkey-register-verify','totp-setup','totp-enable','totp-disable'];
+if (in_array(($_GET['action'] ?? ''), $AUTH_MGMT, true)) {
+    if (($GLOBALS['auth_via'] ?? '') !== 'session') {
+        http_response_code(403); echo json_encode(['error' => 'Web session required']); exit();
+    }
+    $action = $_GET['action'];
+    $in = $rawInput ? json_decode($rawInput, true) : [];
+    if (!is_array($in)) $in = [];
+    header('Cache-Control: no-store, no-cache, must-revalidate');
+
+    if ($action === 'auth-methods') {
+        echo json_encode(['methods' => auth_methods(), 'passkeys' => auth_list_passkeys()]); exit();
+    }
+    if ($action === 'passkeys' && $method === 'GET') {
+        echo json_encode(['passkeys' => auth_list_passkeys()]); exit();
+    }
+    if ($action === 'passkeys' && $method === 'POST') {
+        $r = auth_remove_passkey($in['remove'] ?? '');
+        if ($r === 'last') { http_response_code(400); echo json_encode(['error' => 'Cannot remove the last second factor — enable TOTP first.']); exit(); }
+        echo json_encode(['ok' => (bool)$r]); exit();
+    }
+    if ($action === 'passkey-register-options') {
+        echo json_encode(webauthn_register_options()); exit();
+    }
+    if ($action === 'passkey-register-verify') {
+        $res = webauthn_register_verify($in['response'] ?? [], $in['label'] ?? 'Passkey');
+        if ($res === true) { echo json_encode(['ok' => true]); }
+        else { http_response_code(400); echo json_encode(['error' => $res]); }
+        exit();
+    }
+    if ($action === 'totp-setup') {
+        $secret = auth_totp_new_secret();
+        $_SESSION['totp_pending'] = $secret;
+        echo json_encode(['secret' => $secret, 'uri' => auth_totp_uri($secret, auth_username())]); exit();
+    }
+    if ($action === 'totp-enable') {
+        $secret = $_SESSION['totp_pending'] ?? '';
+        if (!$secret || !auth_totp_verify($secret, $in['code'] ?? '')) {
+            http_response_code(400); echo json_encode(['error' => 'Invalid code']); exit();
+        }
+        $a = auth_read();
+        $codes = auth_generate_backup_codes(8);
+        $a['user']['totpSecret']  = $secret;
+        $a['user']['totpEnabled'] = true;
+        $a['user']['backupCodes'] = array_map('auth_hash_backup_code', $codes);
+        auth_write($a);
+        unset($_SESSION['totp_pending']);
+        echo json_encode(['ok' => true, 'backupCodes' => $codes]); exit();
+    }
+    if ($action === 'totp-disable') {
+        if (!auth_methods()['passkey']) {
+            http_response_code(400); echo json_encode(['error' => 'Add a passkey before disabling TOTP.']); exit();
+        }
+        $a = auth_read();
+        $a['user']['totpEnabled'] = false;
+        $a['user']['totpSecret']  = '';
+        $a['user']['backupCodes'] = [];
+        auth_write($a);
+        echo json_encode(['ok' => true]); exit();
+    }
+}
+
 // ── State routes ──────────────────────────────────────────────────────────────
 if ($method === 'GET' && ($_GET['action'] ?? '') === 'state') {
     header('Cache-Control: no-store, no-cache, must-revalidate');

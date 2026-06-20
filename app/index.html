@@ -161,9 +161,36 @@
 
         <div class="section-label section-label-provider">Security</div>
         <div class="btn-row btn-row-wrap">
+          <button class="btn btn-secondary btn-sm" id="btn-manage-2fa">Two-factor (2FA)</button>
           <button class="btn btn-secondary btn-sm" id="btn-manage-tokens">Extension tokens</button>
           <button class="btn btn-secondary btn-sm" id="btn-logout">Log out</button>
         </div>
+      </div>
+
+      <!-- Two-factor management -->
+      <div class="settings-section" id="section-2fa" style="display:none">
+        <div class="section-label">Authenticator app (TOTP)</div>
+        <div id="totp-status" class="field-hint-text">Loading…</div>
+        <div id="totp-setup-area" style="display:none">
+          <div class="field-hint-text">Add this secret to your authenticator app, then enter the 6-digit code.</div>
+          <div class="auth-url-box visible" id="totp-secret"></div>
+          <div class="field">
+            <div class="section-label">6-digit code</div>
+            <input class="field-input" id="totp-code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456">
+          </div>
+          <button class="btn btn-primary btn-sm" id="btn-totp-confirm">Confirm &amp; enable</button>
+        </div>
+        <div id="totp-backup-area" style="display:none"></div>
+
+        <div class="section-label">Passkeys</div>
+        <div class="field-hint-text">Passkeys (Touch ID, Windows Hello, security keys) work over HTTPS on a real domain — including the installed mobile PWA.</div>
+        <div class="field">
+          <input class="field-input" id="passkey-label" type="text" placeholder="Passkey name (e.g. iPhone)" autocomplete="off">
+        </div>
+        <button class="btn btn-primary btn-sm" id="btn-add-passkey">Add a passkey</button>
+        <div id="passkey-list"></div>
+
+        <div class="btn-row"><button class="btn btn-ghost btn-sm" id="btn-back-2fa">Back</button></div>
       </div>
 
       <!-- Extension device tokens -->

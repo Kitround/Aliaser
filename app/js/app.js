@@ -1279,6 +1279,7 @@ function hideAddForms(){
   document.getElementById('section-add-haltman').style.display='none';
   document.getElementById('section-edit-account').style.display='none';
   document.getElementById('section-device-tokens').style.display='none';
+  document.getElementById('section-2fa').style.display='none';
   document.getElementById('section-accounts').style.display='';
   document.getElementById('settings-modal-title').textContent='Settings';
   document.getElementById('close-settings').style.display='';
@@ -1302,6 +1303,118 @@ document.getElementById('btn-manage-tokens').addEventListener('click',()=>{
   loadDeviceTokens();
 });
 document.getElementById('btn-back-tokens').addEventListener('click',hideAddForms);
+
+// ── Two-factor management (TOTP + passkeys) ───────────────────────────────────
+function _b64urlToBuf(s){s=s.replace(/-/g,'+').replace(/_/g,'/');const pad=s.length%4;if(pad)s+='='.repeat(4-pad);const bin=atob(s);const b=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);return b.buffer;}
+function _bufToB64url(buf){const bytes=new Uint8Array(buf);let s='';for(let i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+document.getElementById('btn-manage-2fa').addEventListener('click',()=>{
+  document.getElementById('section-accounts').style.display='none';
+  document.getElementById('section-2fa').style.display='flex';
+  document.getElementById('settings-modal-title').textContent='Two-factor';
+  document.getElementById('close-settings').style.display='none';
+  document.getElementById('back-settings').style.display='';
+  document.getElementById('totp-setup-area').style.display='none';
+  document.getElementById('totp-backup-area').style.display='none';
+  load2fa();
+});
+document.getElementById('btn-back-2fa').addEventListener('click',hideAddForms);
+async function load2fa(){
+  const statusEl=document.getElementById('totp-status');
+  statusEl.textContent='Loading…';
+  try{
+    const res=_checkAuth(await fetch(PROXY+'?action=auth-methods',{headers:{'Cache-Control':'no-cache'}}));
+    const data=await res.json();
+    const m=data.methods||{};
+    statusEl.textContent='';
+    const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:8px';
+    const label=document.createElement('span');label.className='status-badge';
+    label.innerHTML='<span class="status-dot '+(m.totp?'green':'')+'"></span>'+(m.totp?'Enabled':'Disabled');
+    const btn=document.createElement('button');btn.className='btn btn-secondary btn-sm';btn.style.marginLeft='auto';
+    btn.textContent=m.totp?'Disable':'Enable';
+    btn.onclick=m.totp?disableTotp:startTotpSetup;
+    row.append(label,btn);statusEl.append(row);
+    // passkeys
+    const list=document.getElementById('passkey-list');list.textContent='';
+    (data.passkeys||[]).forEach(p=>list.append(_passkeyRow(p)));
+    if(!(data.passkeys||[]).length){const e=document.createElement('div');e.className='field-hint-text';e.textContent='No passkeys yet.';list.append(e);}
+  }catch(e){statusEl.textContent='Failed to load.';}
+}
+function _passkeyRow(p){
+  const item=document.createElement('div');item.className='account-item';
+  const info=document.createElement('div');info.className='account-item-info';
+  const name=document.createElement('div');name.className='account-item-name';name.textContent=p.label||'Passkey';
+  const sub=document.createElement('div');sub.className='account-item-sub';sub.textContent=new Date((p.created||0)*1000).toLocaleDateString();
+  info.append(name,sub);
+  const btn=document.createElement('button');btn.className='icon-btn danger';btn.title='Remove';
+  btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+  btn.onclick=async()=>{
+    try{
+      const res=await fetch(PROXY+'?action=passkeys',{method:'POST',headers:_writeHeaders(),body:JSON.stringify({remove:p.id})});
+      const d=await res.json();
+      if(!res.ok){showError(d.error||'Failed to remove');return;}
+      load2fa();
+    }catch(e){showError('Failed to remove passkey');}
+  };
+  item.append(info,btn);return item;
+}
+async function startTotpSetup(){
+  try{
+    const res=_checkAuth(await fetch(PROXY+'?action=totp-setup',{method:'POST',headers:_writeHeaders()}));
+    const d=await res.json();
+    document.getElementById('totp-secret').textContent=d.secret||'';
+    document.getElementById('totp-setup-area').style.display='block';
+    document.getElementById('totp-backup-area').style.display='none';
+    document.getElementById('totp-code').value='';
+  }catch(e){showError('Failed to start TOTP setup');}
+}
+document.getElementById('btn-totp-confirm').addEventListener('click',async()=>{
+  const code=document.getElementById('totp-code').value.trim();
+  try{
+    const res=await fetch(PROXY+'?action=totp-enable',{method:'POST',headers:_writeHeaders(),body:JSON.stringify({code})});
+    const d=await res.json();
+    if(!res.ok){showError(d.error||'Invalid code');return;}
+    document.getElementById('totp-setup-area').style.display='none';
+    const area=document.getElementById('totp-backup-area');area.textContent='';
+    const t=document.createElement('div');t.className='field-hint-text';t.textContent='Backup codes (save them, shown once):';area.append(t);
+    const grid=document.createElement('div');grid.className='codes';
+    (d.backupCodes||[]).forEach(c=>{const s=document.createElement('span');s.textContent=c;grid.append(s);});
+    area.append(grid);area.style.display='block';
+    load2fa();
+  }catch(e){showError('Failed to enable TOTP');}
+});
+async function disableTotp(){
+  try{
+    const res=await fetch(PROXY+'?action=totp-disable',{method:'POST',headers:_writeHeaders()});
+    const d=await res.json();
+    if(!res.ok){showError(d.error||'Failed to disable');return;}
+    document.getElementById('totp-setup-area').style.display='none';
+    document.getElementById('totp-backup-area').style.display='none';
+    load2fa();
+  }catch(e){showError('Failed to disable TOTP');}
+}
+document.getElementById('btn-add-passkey').addEventListener('click',async()=>{
+  if(!window.PublicKeyCredential){showError('Passkeys not supported in this browser');return;}
+  const label=document.getElementById('passkey-label').value.trim()||'Passkey';
+  const btn=document.getElementById('btn-add-passkey');btn.disabled=true;
+  try{
+    const res=_checkAuth(await fetch(PROXY+'?action=passkey-register-options',{method:'POST',headers:_writeHeaders()}));
+    const opt=await res.json();
+    opt.challenge=_b64urlToBuf(opt.challenge);
+    opt.user.id=_b64urlToBuf(opt.user.id);
+    (opt.excludeCredentials||[]).forEach(c=>{c.id=_b64urlToBuf(c.id);});
+    const cred=await navigator.credentials.create({publicKey:opt});
+    const response={
+      id:cred.id,rawId:_bufToB64url(cred.rawId),type:cred.type,
+      response:{clientDataJSON:_bufToB64url(cred.response.clientDataJSON),attestationObject:_bufToB64url(cred.response.attestationObject)},
+    };
+    const vr=await fetch(PROXY+'?action=passkey-register-verify',{method:'POST',headers:_writeHeaders(),body:JSON.stringify({response,label})});
+    const vd=await vr.json();
+    if(!vr.ok){showError(vd.error||'Registration failed');return;}
+    document.getElementById('passkey-label').value='';
+    load2fa();
+  }catch(e){showError('Passkey registration failed: '+(e.message||e));}
+  finally{btn.disabled=false;}
+});
 // Build the token list with DOM nodes (no innerHTML) — labels are user-supplied.
 function _tokenRow(t){
   const item=document.createElement('div');item.className='account-item';

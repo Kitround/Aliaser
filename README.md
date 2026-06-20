@@ -117,7 +117,7 @@ Tokens are revocable from the same screen. One token per device/browser is recom
 
 ## Security
 
-- **Login required**: username + password (argon2id) + **TOTP two-factor** (RFC 6238). First run walks you through creating the admin account and enrolling 2FA, with one-time backup codes.
+- **Login required**: username + password (argon2id) + **two-factor** — **TOTP** (RFC 6238, with one-time backup codes) and/or **passkeys** (WebAuthn / FIDO2, ES256). Choose what to enable in Settings → Security; you can't remove your last factor. Passkeys require HTTPS on a real domain (work in the installed mobile PWA too).
 - Secure session cookies (`HttpOnly`, `SameSite=Strict`, `Secure` under HTTPS), CSRF tokens on writes, brute-force lockout.
 - Extensions authenticate with a revocable **device token** (Settings → Security → Extension tokens), pasted into the extension Options.
 - API tokens are stored **encrypted** (AES-256-GCM) in `credentials.json` — never in plain text, and never returned to the browser (resolved server-side per request).

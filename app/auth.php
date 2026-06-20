@@ -111,8 +111,19 @@ function auth_write($data) {
     return $r;
 }
 function auth_user_exists()   { $a = auth_read(); return !empty($a['user']); }
-function auth_is_configured() { $a = auth_read(); return !empty($a['user']) && !empty($a['user']['totpEnabled']); }
 function auth_username()      { $a = auth_read(); return $a['user']['username'] ?? ''; }
+// Which second factors are enabled. A user is "configured" once at least one is.
+function auth_methods() {
+    $a = auth_read();
+    return [
+        'totp'    => !empty($a['user']['totpEnabled']),
+        'passkey' => !empty($a['user']['passkeys']),
+    ];
+}
+function auth_is_configured() {
+    $m = auth_methods();
+    return auth_user_exists() && ($m['totp'] || $m['passkey']);
+}
 
 // ── Password ──────────────────────────────────────────────────────────────────
 function auth_hash_password($pw) {
@@ -245,6 +256,205 @@ function auth_revoke_device_token($id) {
     $a = auth_read();
     $a['deviceTokens'] = array_values(array_filter($a['deviceTokens'], fn($d) => ($d['id'] ?? '') !== $id));
     return auth_write($a) !== false;
+}
+
+// ── WebAuthn / passkeys (pure PHP, ES256 only) ────────────────────────────────
+// Implements the standard registration/assertion verification steps. Limited to
+// ES256 (P-256), which every modern platform authenticator and security key
+// supports. Requires HTTPS and a real domain (rpId cannot be a bare IP).
+function b64url_encode($bin) { return rtrim(strtr(base64_encode($bin), '+/', '-_'), '='); }
+function b64url_decode($s) {
+    $s = strtr($s, '-_', '+/');
+    $pad = strlen($s) % 4;
+    if ($pad) $s .= str_repeat('=', 4 - $pad);
+    return base64_decode($s);
+}
+
+// rpId = the host the browser is talking to (no port). origin = scheme://host[:port].
+function webauthn_rp_id() {
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    return preg_replace('/:\d+$/', '', $host);
+}
+function webauthn_origin() {
+    $scheme = aliaser_is_https() ? 'https' : 'http';
+    return $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
+}
+
+// Minimal CBOR decoder — enough for attestationObject and COSE keys.
+// Returns [value, nextOffset].
+function cbor_decode($d, $off = 0) {
+    $ib = ord($d[$off]); $off++;
+    $major = $ib >> 5; $ai = $ib & 0x1f;
+    $readLen = function($ai) use ($d, &$off) {
+        if ($ai < 24) return $ai;
+        if ($ai === 24) { $v = ord($d[$off]); $off += 1; return $v; }
+        if ($ai === 25) { $v = unpack('n', substr($d, $off, 2))[1]; $off += 2; return $v; }
+        if ($ai === 26) { $v = unpack('N', substr($d, $off, 4))[1]; $off += 4; return $v; }
+        if ($ai === 27) { $v = unpack('J', substr($d, $off, 8))[1]; $off += 8; return $v; }
+        throw new Exception('CBOR len');
+    };
+    switch ($major) {
+        case 0: return [$readLen($ai), $off];                       // uint
+        case 1: return [-1 - $readLen($ai), $off];                  // negative int
+        case 2: $n = $readLen($ai); $v = substr($d, $off, $n); $off += $n; return [$v, $off]; // bytes
+        case 3: $n = $readLen($ai); $v = substr($d, $off, $n); $off += $n; return [$v, $off]; // text
+        case 4: $n = $readLen($ai); $arr = [];                      // array
+                for ($i = 0; $i < $n; $i++) { [$val, $off] = cbor_decode($d, $off); $arr[] = $val; }
+                return [$arr, $off];
+        case 5: $n = $readLen($ai); $map = [];                      // map
+                for ($i = 0; $i < $n; $i++) { [$k, $off] = cbor_decode($d, $off); [$val, $off] = cbor_decode($d, $off); $map[$k] = $val; }
+                return [$map, $off];
+        case 7: if ($ai === 20) return [false, $off]; if ($ai === 21) return [true, $off]; if ($ai === 22) return [null, $off]; return [null, $off];
+    }
+    throw new Exception('CBOR major ' . $major);
+}
+
+// Build a PEM SubjectPublicKeyInfo from a COSE EC2 P-256 key (kty=2, crv=1).
+function cose_ec2_to_pem($cose) {
+    if (($cose[1] ?? null) != 2)  return null;   // kty must be EC2
+    if (($cose[3] ?? null) != -7) return null;   // alg must be ES256
+    if (($cose[-1] ?? null) != 1) return null;   // crv must be P-256
+    $x = $cose[-2] ?? ''; $y = $cose[-3] ?? '';
+    if (strlen($x) !== 32 || strlen($y) !== 32) return null;
+    // Fixed DER prefix for an uncompressed P-256 SubjectPublicKeyInfo + 0x04||x||y.
+    $der = hex2bin('3059301306072a8648ce3d020106082a8648ce3d030107034200') . "\x04" . $x . $y;
+    return "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END PUBLIC KEY-----\n";
+}
+
+// Passkey storage
+function auth_list_passkeys() {
+    $a = auth_read();
+    return array_map(fn($p) => ['id' => $p['id'] ?? '', 'label' => $p['label'] ?? '', 'created' => $p['created'] ?? 0],
+        $a['user']['passkeys'] ?? []);
+}
+function auth_get_passkey($credIdB64) {
+    $a = auth_read();
+    foreach ($a['user']['passkeys'] ?? [] as $p) {
+        if (hash_equals($p['id'] ?? '', $credIdB64)) return $p;
+    }
+    return null;
+}
+function auth_remove_passkey($credIdB64) {
+    $a = auth_read();
+    if (empty($a['user'])) return false;
+    $before = count($a['user']['passkeys'] ?? []);
+    $a['user']['passkeys'] = array_values(array_filter($a['user']['passkeys'] ?? [],
+        fn($p) => ($p['id'] ?? '') !== $credIdB64));
+    // Never let the account end up with zero factors.
+    if (empty($a['user']['passkeys']) && empty($a['user']['totpEnabled'])) return 'last';
+    auth_write($a);
+    return count($a['user']['passkeys']) < $before;
+}
+
+// Registration: returns options for navigator.credentials.create (challenge in session).
+function webauthn_register_options() {
+    $challenge = random_bytes(32);
+    $_SESSION['webauthn_chal'] = b64url_encode($challenge);
+    $a = auth_read();
+    $exclude = array_map(fn($p) => ['type' => 'public-key', 'id' => $p['id']], $a['user']['passkeys'] ?? []);
+    return [
+        'challenge' => b64url_encode($challenge),
+        'rp'   => ['id' => webauthn_rp_id(), 'name' => 'Aliaser'],
+        'user' => ['id' => b64url_encode(auth_username() ?: 'admin'), 'name' => auth_username() ?: 'admin', 'displayName' => auth_username() ?: 'admin'],
+        'pubKeyCredParams'       => [['type' => 'public-key', 'alg' => -7]],
+        'timeout'                => 60000,
+        'attestation'            => 'none',
+        'excludeCredentials'     => $exclude,
+        'authenticatorSelection' => ['userVerification' => 'preferred', 'residentKey' => 'preferred'],
+    ];
+}
+
+// Registration verify: $resp = decoded JSON from the browser. Returns true on success.
+function webauthn_register_verify($resp, $label) {
+    $clientDataJson = b64url_decode($resp['response']['clientDataJSON'] ?? '');
+    $cd = json_decode($clientDataJson, true);
+    if (!is_array($cd)) return 'Bad clientData';
+    if (($cd['type'] ?? '') !== 'webauthn.create') return 'Bad type';
+    if (!hash_equals($_SESSION['webauthn_chal'] ?? '', $cd['challenge'] ?? '')) return 'Challenge mismatch';
+    if (($cd['origin'] ?? '') !== webauthn_origin()) return 'Origin mismatch';
+
+    $att = b64url_decode($resp['response']['attestationObject'] ?? '');
+    try { [$attObj] = cbor_decode($att, 0); } catch (Exception $e) { return 'Bad attestation'; }
+    $authData = $attObj['authData'] ?? '';
+    if (strlen($authData) < 37) return 'Bad authData';
+    $rpIdHash = substr($authData, 0, 32);
+    if (!hash_equals(hash('sha256', webauthn_rp_id(), true), $rpIdHash)) return 'rpId mismatch';
+    $flags = ord($authData[32]);
+    if (!($flags & 0x01)) return 'User not present';
+    if (!($flags & 0x40)) return 'No attested credential';
+    $credIdLen = unpack('n', substr($authData, 53, 2))[1];
+    $credId = substr($authData, 55, $credIdLen);
+    [$cose] = cbor_decode($authData, 55 + $credIdLen);
+    $pem = cose_ec2_to_pem($cose);
+    if (!$pem) return 'Unsupported key (need ES256/P-256)';
+    $signCount = unpack('N', substr($authData, 33, 4))[1];
+
+    $a = auth_read();
+    if (empty($a['user'])) return 'No user';
+    if (!isset($a['user']['passkeys'])) $a['user']['passkeys'] = [];
+    $a['user']['passkeys'][] = [
+        'id'        => b64url_encode($credId),
+        'publicKey' => $pem,
+        'signCount' => $signCount,
+        'label'     => mb_substr((string)$label, 0, 60) ?: 'Passkey',
+        'created'   => time(),
+    ];
+    auth_write($a);
+    unset($_SESSION['webauthn_chal']);
+    return true;
+}
+
+// Assertion (login): options for navigator.credentials.get.
+function webauthn_assertion_options() {
+    $challenge = random_bytes(32);
+    $_SESSION['webauthn_chal'] = b64url_encode($challenge);
+    $a = auth_read();
+    $allow = array_map(fn($p) => ['type' => 'public-key', 'id' => $p['id']], $a['user']['passkeys'] ?? []);
+    return [
+        'challenge'        => b64url_encode($challenge),
+        'rpId'             => webauthn_rp_id(),
+        'timeout'          => 60000,
+        'userVerification' => 'preferred',
+        'allowCredentials' => $allow,
+    ];
+}
+
+// Assertion verify. Returns true on success.
+function webauthn_assertion_verify($resp) {
+    $credId = $resp['id'] ?? '';
+    $pk = auth_get_passkey($credId);
+    if (!$pk) return 'Unknown credential';
+
+    $clientDataJson = b64url_decode($resp['response']['clientDataJSON'] ?? '');
+    $cd = json_decode($clientDataJson, true);
+    if (!is_array($cd)) return 'Bad clientData';
+    if (($cd['type'] ?? '') !== 'webauthn.get') return 'Bad type';
+    if (!hash_equals($_SESSION['webauthn_chal'] ?? '', $cd['challenge'] ?? '')) return 'Challenge mismatch';
+    if (($cd['origin'] ?? '') !== webauthn_origin()) return 'Origin mismatch';
+
+    $authData = b64url_decode($resp['response']['authenticatorData'] ?? '');
+    if (strlen($authData) < 37) return 'Bad authData';
+    if (!hash_equals(hash('sha256', webauthn_rp_id(), true), substr($authData, 0, 32))) return 'rpId mismatch';
+    if (!(ord($authData[32]) & 0x01)) return 'User not present';
+
+    $sig = b64url_decode($resp['response']['signature'] ?? '');
+    $signedData = $authData . hash('sha256', $clientDataJson, true);
+    $ok = openssl_verify($signedData, $sig, $pk['publicKey'], OPENSSL_ALGO_SHA256);
+    if ($ok !== 1) return 'Bad signature';
+
+    // Clone/replay defence: sign counter must move forward (unless device reports 0).
+    $newCount = unpack('N', substr($authData, 33, 4))[1];
+    if ($newCount !== 0 || ($pk['signCount'] ?? 0) !== 0) {
+        if ($newCount <= ($pk['signCount'] ?? 0)) return 'Sign-count replay';
+    }
+    $a = auth_read();
+    foreach ($a['user']['passkeys'] as &$p) {
+        if (hash_equals($p['id'], $credId)) { $p['signCount'] = $newCount; break; }
+    }
+    unset($p);
+    auth_write($a);
+    unset($_SESSION['webauthn_chal']);
+    return true;
 }
 
 // ── Rate limiting / lockout (per client IP) ───────────────────────────────────
