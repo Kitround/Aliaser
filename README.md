@@ -47,20 +47,16 @@ app/
   index.html        — UI (single page)
   css/style.css     — Styles (dark theme, responsive)
   js/app.js         — All frontend logic
-  proxy.php         — PHP backend: signs OVH requests, proxies API calls, persists data
+  proxy.php         — PHP backend: proxies provider API calls, persists data
   json/             — Server-side data (auto-created, not committed)
 extensions/
   chrome/           — Chrome extension (MV3)
   firefox/          — Firefox extension
-docker/             — Dockerfile, entrypoint, Apache security-headers config
+docker/             — Dockerfile, entrypoint, Apache config
 docker-compose.yml
 ```
 
-Data is persisted in `app/json/` on the server:
-- `state.json` — accounts and settings
-- `notes.json` — alias notes
-- `credentials.json` — API tokens (AES-256-GCM encrypted)
-- `addy-contacts.json` — Addy.io contacts cache
+Server-side data lives under `app/json/` (mounted as a volume, not committed). Sensitive values are encrypted at rest.
 
 ## Deployment
 
@@ -80,7 +76,7 @@ Data is persisted in `app/json/` on the server:
          ALIASER_SECRET_KEY: "your_key_here"
    ```
 
-2. Generate `ALIASER_SECRET_KEY` with `openssl rand -hex 32` (64 hex chars) and keep it stable — it encrypts credentials and the auth store.
+2. Generate `ALIASER_SECRET_KEY` with `openssl rand -hex 32` (64 hex chars) and keep it stable across restarts.
 
 3. Open `http://YOUR_HOST:8090`. On first run you'll create the admin account, enrol TOTP two-factor (scan/enter the secret in an authenticator app), and save the one-time backup codes. Then add your provider accounts from Settings.
 
@@ -95,12 +91,7 @@ Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
    mkdir -p json && chown www-data:www-data json
    ```
 
-3. Set the encryption key as an environment variable in your PHP-FPM or Apache config:
-   ```bash
-   ALIASER_SECRET_KEY=your_64_char_hex_key
-   ```
-
-   If not set, a key is auto-generated and stored in `json/secret.key` (less secure).
+3. Set `ALIASER_SECRET_KEY` (64 hex chars) as an environment variable in your PHP-FPM or Apache config, and ensure `json/` is not reachable over HTTP.
 
 4. Open the app — complete the first-run admin + TOTP setup, then add your accounts from Settings.
 
@@ -126,20 +117,16 @@ In **Settings → Security → Two-factor** you can then:
 
 Password + TOTP stays available as the alternative to passkeys.
 
-> **Passkeys require HTTPS and a real domain name** (not a bare IP). The `rpId` is derived from the request host, so it works on any self-hosted domain — including the installed mobile PWA. Make sure your reverse proxy forwards the original `Host` header and `X-Forwarded-Proto: https`.
+> **Passkeys require HTTPS and a real domain name** (not a bare IP) — they also work in the installed mobile PWA. Behind a reverse proxy, forward the original `Host` header and `X-Forwarded-Proto`.
 
 ## Security
 
-- **Login required**: password (argon2id) + **TOTP** (RFC 6238, backup codes) and/or **passwordless passkeys** (WebAuthn / FIDO2, ES256).
-- Secure session cookies (`HttpOnly`, `SameSite=Lax`, `Secure` under HTTPS), CSRF tokens on writes, brute-force lockout.
-- Extensions authenticate with a revocable **device token** (Settings → Security → Extension tokens), pasted into the extension Options.
-- API tokens are stored **encrypted** (AES-256-GCM) in `credentials.json` — never in plain text, and never returned to the browser (resolved server-side per request).
-- Auth data (`auth.json`) is encrypted at rest; tokens never written to `state.json`.
-- Per-provider API path allowlist — the proxy can only reach the providers' alias endpoints, not arbitrary URLs.
-- Direct HTTP access to the `json/` data directory is denied.
-- Security headers on every response: `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
+- Login required, with two-factor: **TOTP** and/or **passwordless passkeys**.
+- Provider API tokens are encrypted at rest and never returned to the browser.
+- CSRF protection, brute-force lockout, and standard security headers.
+- Extensions authenticate with a revocable **device token** (Settings → Security → Extension tokens).
 
-> ⚠️ **For public exposure, serve over HTTPS** (reverse proxy / Cloudflare). HTTPS is required for `Secure` cookies and to protect the password in transit. Also set a stable `ALIASER_SECRET_KEY` so `auth.json` survives restarts.
+> ⚠️ **Intended to run behind HTTPS** (reverse proxy / Cloudflare), ideally on a private network / VPN. Set a stable `ALIASER_SECRET_KEY` and keep `json/` off the public web.
 
 ## Adding accounts
 
