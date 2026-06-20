@@ -25,7 +25,10 @@ const PROXY='./proxy.php';
 // 401 from the proxy → session gone/expired → bounce to the login page.
 // Writes carry the session CSRF token (fetched once via ?action=csrf).
 let _csrf='';
-function _redirectLogin(){location.href='login.php';}
+// On logout / session loss, wipe the locally cached alias list + notes so they
+// aren't readable on the device after sign-out. (The cache holds no secrets,
+// but it does hold aliases/notes that the login screen is meant to hide.)
+function _redirectLogin(){try{localStorage.removeItem(ALIAS_CACHE_KEY);}catch(e){}location.href='login.php';}
 function _checkAuth(res){if(res&&res.status===401){_redirectLogin();throw new Error('Authentication required');}return res;}
 function _writeHeaders(){return{'Content-Type':'application/json','X-CSRF-Token':_csrf};}
 async function loadCsrf(){
