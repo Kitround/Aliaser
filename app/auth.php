@@ -248,8 +248,12 @@ function auth_revoke_device_token($id) {
 }
 
 // ── Rate limiting / lockout (per client IP) ───────────────────────────────────
+// Use REMOTE_ADDR only — never the client-supplied X-Forwarded-For, which an
+// attacker can rotate to bypass the lockout entirely. Behind a reverse proxy
+// this is the proxy's IP (lockout is then effectively global, which is fine for
+// a single-admin app). For public exposure, add fail2ban/WAF at the proxy too.
 function auth_throttle_key() {
-    return $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    return $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 }
 function auth_throttle_read() {
     if (!file_exists(THROTTLE_FILE)) return [];
@@ -290,11 +294,16 @@ function aliaser_session_start() {
     if (session_status() === PHP_SESSION_ACTIVE) return;
     ini_set('session.use_strict_mode', '1');
     ini_set('session.cookie_httponly', '1');
+    // SameSite=Lax (not Strict): lets the session survive a top-level navigation
+    // from outside (bookmark / installed-PWA launch / external link) so the user
+    // isn't bounced to login spuriously. CSRF is still fully covered — writes
+    // require the X-CSRF-Token header, and Lax never sends the cookie on
+    // cross-site POST/subresource requests.
     session_set_cookie_params([
         'lifetime' => 0,
         'path'     => '/',
         'httponly' => true,
-        'samesite' => 'Strict',
+        'samesite' => 'Lax',
         'secure'   => aliaser_is_https(),
     ]);
     session_name('aliaser_sid');
