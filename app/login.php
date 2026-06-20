@@ -25,10 +25,12 @@ function check_form_csrf() {
 }
 function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 
-// ── Passkey login (2FA) — JSON sub-API, only after the password step ──────────
+// ── Passwordless passkey login — JSON sub-API ─────────────────────────────────
+// A passkey (device possession + user verification) is a strong single step:
+// no password needed. Available whenever at least one passkey is enrolled.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_GET['action'] ?? '', ['passkey-login-options', 'passkey-login-verify'], true)) {
     header('Content-Type: application/json');
-    if (empty($_SESSION['pending_user'])) { http_response_code(403); echo json_encode(['error' => 'No pending login']); exit; }
+    if (!auth_methods()['passkey']) { http_response_code(400); echo json_encode(['error' => 'No passkey enrolled']); exit; }
     if (auth_is_locked()) { http_response_code(429); echo json_encode(['error' => 'Too many attempts']); exit; }
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     if (!hash_equals($_SESSION['form_csrf'] ?? '', $in['csrf'] ?? '')) { http_response_code(403); echo json_encode(['error' => 'CSRF']); exit; }
@@ -36,8 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_GET['action'] ?? '', ['p
     $res = webauthn_assertion_verify($in['response'] ?? []);
     if ($res === true) {
         auth_reset_fails();
-        $u = $_SESSION['pending_user']; unset($_SESSION['pending_user']);
-        auth_establish_session($u);
+        auth_establish_session(auth_username());
         echo json_encode(['ok' => true, 'redirect' => './']); exit;
     }
     auth_record_fail();
@@ -112,9 +113,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$configured) {                 // enrolment was interrupted
                     $_SESSION['enroll'] = $username;
                     $stage = 'enroll';
-                } else {
+                } elseif (auth_methods()['totp']) {
                     $_SESSION['pending_user'] = $username;
                     $stage = 'twofa';
+                } else {
+                    // Only a passkey is configured — password path can't 2FA.
+                    $error = 'This account signs in with a passkey — use the “Sign in with a passkey” button.';
+                    $stage = 'login';
                 }
             } else {
                 auth_record_fail();
@@ -223,38 +228,37 @@ $csrf = form_csrf();
     <div class="warn">⚠ They will not be shown again.</div>
     <a class="btnlink" href="./">Continue to Aliaser</a>
 
-  <?php elseif ($stage === 'twofa'): $m = auth_methods(); ?>
+  <?php elseif ($stage === 'twofa'): ?>
+    <div class="sub">Enter the 6-digit code from your authenticator app (or a backup code).</div>
+    <form method="post" autocomplete="off">
+      <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
+      <input type="hidden" name="action" value="twofa">
+      <label>Code</label>
+      <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" autofocus required>
+      <button type="submit">Verify</button>
+    </form>
+
+  <?php else: $m = auth_methods(); ?>
     <input type="hidden" id="form-csrf" value="<?= h($csrf) ?>">
     <?php if ($m['passkey']): ?>
-      <div class="sub">Confirm your identity with your passkey.</div>
-      <button type="button" id="pk-login-btn">Use a passkey</button>
+      <button type="button" id="pk-login-btn">Sign in with a passkey</button>
       <div class="err" id="pk-error" style="display:none"></div>
+      <div class="sub" style="margin-top:18px">…or with your username and password.</div>
+    <?php else: ?>
+      <div class="sub">Sign in to manage your aliases.</div>
     <?php endif; ?>
-    <?php if ($m['totp']): ?>
-      <?php if ($m['passkey']): ?><div class="sub" style="margin-top:18px">…or enter a code from your authenticator.</div><?php else: ?><div class="sub">Enter the 6-digit code from your authenticator app (or a backup code).</div><?php endif; ?>
-      <form method="post" autocomplete="off">
-        <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
-        <input type="hidden" name="action" value="twofa">
-        <label>Code</label>
-        <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code"<?= $m['passkey'] ? '' : ' autofocus' ?> required>
-        <button type="submit">Verify</button>
-      </form>
-    <?php endif; ?>
-
-  <?php else: ?>
-    <div class="sub">Sign in to manage your aliases.</div>
     <form method="post" autocomplete="off">
       <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
       <input type="hidden" name="action" value="login">
       <label>Username</label>
-      <input name="username" type="text" autocapitalize="none" autocomplete="username" required autofocus>
+      <input name="username" type="text" autocapitalize="none" autocomplete="username" required<?= $m['passkey'] ? '' : ' autofocus' ?>>
       <label>Password</label>
       <input name="password" type="password" autocomplete="current-password" required>
       <button type="submit">Sign in</button>
     </form>
   <?php endif; ?>
 </div>
-<?php if ($stage === 'twofa' && auth_methods()['passkey']): ?>
+<?php if ($stage !== 'twofa' && auth_methods()['passkey']): ?>
 <script src="webauthn.js"></script>
 <?php endif; ?>
 </body>
