@@ -82,7 +82,9 @@ Data is persisted in `app/json/` on the server:
          ALIASER_SECRET_KEY: "your_key_here"
    ```
 
-2. Open `http://YOUR_HOST:8090` and add your accounts from Settings.
+2. Generate `ALIASER_SECRET_KEY` with `openssl rand -hex 32` (64 hex chars) and keep it stable — it encrypts credentials and the auth store.
+
+3. Open `http://YOUR_HOST:8090`. On first run you'll create the admin account, enrol TOTP two-factor (scan/enter the secret in an authenticator app), and save the one-time backup codes. Then add your provider accounts from Settings.
 
 ### Manual (nginx / Apache + PHP 8.2+)
 
@@ -102,7 +104,18 @@ Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
 
    If not set, a key is auto-generated and stored in `json/secret.key` (less secure).
 
-4. Open the app in your browser and add your accounts from Settings.
+4. Open the app — complete the first-run admin + TOTP setup, then add your accounts from Settings.
+
+## Browser extensions
+
+The Chrome/Firefox popups talk to the same server.
+
+1. Load the extension (`extensions/chrome` or `extensions/firefox`).
+2. Open the extension **Options** and set the **Server URL** (e.g. `https://YOUR_HOST`).
+3. In the app: **Settings → Security → Extension tokens → Generate**, copy the token (shown once).
+4. Paste it into the extension's **Device token** field in Options and save.
+
+Tokens are revocable from the same screen. One token per device/browser is recommended.
 
 ## Security
 
