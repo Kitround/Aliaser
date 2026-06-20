@@ -115,10 +115,23 @@ The Chrome/Firefox popups talk to the same server.
 
 Tokens are revocable from the same screen. One token per device/browser is recommended.
 
+## Sign-in & two-factor
+
+On first run you create the admin account and enrol **TOTP** (authenticator app) with one-time backup codes.
+
+In **Settings → Security → Two-factor** you can then:
+
+- **Add passkeys** (WebAuthn / FIDO2 — Touch ID, Windows Hello, Android, security keys). A passkey is a **passwordless** login: on the sign-in screen, tap **"Sign in with a passkey"** and confirm with biometrics/PIN — no username or password needed.
+- Enable/disable TOTP. You can't remove your last factor, so you always keep a way in.
+
+Password + TOTP stays available as the alternative to passkeys.
+
+> **Passkeys require HTTPS and a real domain name** (not a bare IP). The `rpId` is derived from the request host, so it works on any self-hosted domain — including the installed mobile PWA. Make sure your reverse proxy forwards the original `Host` header and `X-Forwarded-Proto: https`.
+
 ## Security
 
-- **Login required**: username + password (argon2id) + **two-factor** — **TOTP** (RFC 6238, with one-time backup codes) and/or **passkeys** (WebAuthn / FIDO2, ES256). Choose what to enable in Settings → Security; you can't remove your last factor. Passkeys require HTTPS on a real domain (work in the installed mobile PWA too).
-- Secure session cookies (`HttpOnly`, `SameSite=Strict`, `Secure` under HTTPS), CSRF tokens on writes, brute-force lockout.
+- **Login required**: password (argon2id) + **TOTP** (RFC 6238, backup codes) and/or **passwordless passkeys** (WebAuthn / FIDO2, ES256).
+- Secure session cookies (`HttpOnly`, `SameSite=Lax`, `Secure` under HTTPS), CSRF tokens on writes, brute-force lockout.
 - Extensions authenticate with a revocable **device token** (Settings → Security → Extension tokens), pasted into the extension Options.
 - API tokens are stored **encrypted** (AES-256-GCM) in `credentials.json` — never in plain text, and never returned to the browser (resolved server-side per request).
 - Auth data (`auth.json`) is encrypted at rest; tokens never written to `state.json`.
