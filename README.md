@@ -106,15 +106,16 @@ Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
 
 ## Security
 
-- API tokens are stored **encrypted** (AES-256-GCM) in `credentials.json` — never in plain text, and never returned to the browser (resolved server-side per request)
-- Tokens are never written to `state.json`
-- Per-provider API path allowlist — the proxy can only reach the providers' alias endpoints, not arbitrary URLs
-- Direct HTTP access to the `json/` data directory is denied
-- Security headers on every response: `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`
-- Optional shared-secret auth via the `ALIASER_AUTH_TOKEN` env var (sent as the `X-Aliaser-Auth` header)
-- No built-in login UI — intended for **private/LAN/VPN** use only
+- **Login required**: username + password (argon2id) + **TOTP two-factor** (RFC 6238). First run walks you through creating the admin account and enrolling 2FA, with one-time backup codes.
+- Secure session cookies (`HttpOnly`, `SameSite=Strict`, `Secure` under HTTPS), CSRF tokens on writes, brute-force lockout.
+- Extensions authenticate with a revocable **device token** (Settings → Security → Extension tokens), pasted into the extension Options.
+- API tokens are stored **encrypted** (AES-256-GCM) in `credentials.json` — never in plain text, and never returned to the browser (resolved server-side per request).
+- Auth data (`auth.json`) is encrypted at rest; tokens never written to `state.json`.
+- Per-provider API path allowlist — the proxy can only reach the providers' alias endpoints, not arbitrary URLs.
+- Direct HTTP access to the `json/` data directory is denied.
+- Security headers on every response: `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
 
-> ⚠️ Do not expose this app on the public internet without adding authentication (e.g. HTTP Basic Auth via nginx).
+> ⚠️ **For public exposure, serve over HTTPS** (reverse proxy / Cloudflare). HTTPS is required for `Secure` cookies and to protect the password in transit. Also set a stable `ALIASER_SECRET_KEY` so `auth.json` survives restarts.
 
 ## Adding accounts
 

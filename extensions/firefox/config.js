@@ -16,8 +16,9 @@ window.ALIASER_CONFIG_READY = new Promise(resolve => {
     }
   });
 
-  browser.storage.local.get('aliaser_proxy_url').then(result => {
+  browser.storage.local.get(['aliaser_proxy_url', 'aliaser_device_token']).then(result => {
     const saved = result?.aliaser_proxy_url;
+    window.ALIASER_DEVICE_TOKEN = result?.aliaser_device_token || '';
 
     if (saved) {
       _applyUrl(saved);

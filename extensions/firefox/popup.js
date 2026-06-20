@@ -18,6 +18,14 @@ const ps = {
 
 // Read dynamically so it picks up the URL set by config.js after first-time setup
 function getProxy() { return window.ALIASER_PROXY_URL || './proxy.php'; }
+function getDeviceToken() { return window.ALIASER_DEVICE_TOKEN || ''; }
+// Inject the device token so the server's auth gate accepts extension requests.
+function authHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  const t = getDeviceToken();
+  if (t) h['X-Aliaser-Auth'] = t;
+  return h;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
@@ -72,7 +80,8 @@ async function pc(provider, method, path, body = null, extra = {}, retries = 2) 
   if (body !== null && body !== undefined) payload.body = body;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res  = await fetch(getProxy(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res  = await fetch(getProxy(), { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(payload) });
+      if (res.status === 401) throw new Error('Not authorized — set a device token in Options.');
       const text = await res.text();
       let data; try { data = JSON.parse(text); } catch { data = text || null; }
       if (!res.ok) { const m = data?.message || data?.error; throw new Error(m ? m + ' (HTTP ' + res.status + ')' : 'HTTP ' + res.status); }
@@ -90,7 +99,8 @@ async function pc(provider, method, path, body = null, extra = {}, retries = 2) 
 async function loadPopupState() {
   const proxy = getProxy();
   const safeFetch = (url) =>
-    fetch(url).then(r => {
+    fetch(url, { headers: authHeaders() }).then(r => {
+      if (r.status === 401) throw new Error('Not authorized — set a device token in Options.');
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
@@ -116,7 +126,7 @@ async function saveNotes() {
   try {
     await fetch(getProxy() + '?action=notes', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(ps.notes),
     });
   } catch (e) { console.error('Failed to save notes:', e); }
@@ -141,7 +151,7 @@ async function saveServerState() {
     disabledAliases:   allDisabled,
   };
   try {
-    await fetch(getProxy() + '?action=state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    await fetch(getProxy() + '?action=state', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(payload) });
   } catch (e) { console.error('Failed to save state:', e); }
 }
 

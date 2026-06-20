@@ -12,9 +12,10 @@
  *  - CSP / HSTS / Permissions-Policy headers
  *  - Server-side token resolution by accountId — tokens never leave the server
  *  - Strict 64-hex encryption key validation, no silent webroot fallback
+ *  - Login required (session or device token) — see auth.php
  */
 
-umask(0077);
+require_once __DIR__ . '/auth.php'; // umask, file constants, crypto, auth core
 
 // ── Security headers ──────────────────────────────────────────────────────────
 header('X-Content-Type-Options: nosniff');
@@ -43,20 +44,13 @@ if ($isExtOrigin) {
 
 header('Content-Type: application/json');
 
-// ── Optional shared-secret auth ──────────────────────────────────────────────
-$authToken = getenv('ALIASER_AUTH_TOKEN');
-if ($authToken !== false && $authToken !== '') {
-    $provided = $_SERVER['HTTP_X_ALIASER_AUTH'] ?? '';
-    if (!is_string($provided) || !hash_equals($authToken, $provided)) {
-        http_response_code(401);
-        echo json_encode(['error' => 'Unauthorized']);
-        exit;
-    }
-}
+// ── Authentication gate (web session OR extension device token) ──────────────
+aliaser_require_auth();
 
-// ── Origin / Referer check on writes (CSRF mitigation) ──────────────────────
+// ── Origin / Referer check + CSRF on writes ─────────────────────────────────
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+    aliaser_require_csrf(); // no-op for device-token (extension) requests
     $referer = $_SERVER['HTTP_REFERER'] ?? '';
     $host    = $_SERVER['HTTP_HOST']    ?? '';
     $sameOrigin = false;
@@ -91,78 +85,8 @@ if (in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
     }
 }
 
-// ── State files ───────────────────────────────────────────────────────────────
-define('STATE_FILE',         __DIR__ . '/json/state.json');
-define('NOTES_FILE',         __DIR__ . '/json/notes.json');
-define('CREDS_FILE',         __DIR__ . '/json/credentials.json');
-define('KEY_FILE',           __DIR__ . '/json/secret.key');
-define('ADDY_CONTACTS_FILE', __DIR__ . '/json/addy-contacts.json');
-
-// ── Encryption helpers ────────────────────────────────────────────────────────
-function getEncryptionKey() {
-    // 1. Environment variable — best for Docker / VPS
-    $envKey = getenv('ALIASER_SECRET_KEY');
-    if ($envKey !== false && $envKey !== '') {
-        if (!preg_match('/^[0-9a-f]{64}$/i', $envKey)) {
-            http_response_code(500);
-            echo json_encode(['error' => 'ALIASER_SECRET_KEY must be 64 hex chars (32 bytes)']);
-            exit;
-        }
-        return $envKey;
-    }
-
-    // 2. File above web root — best for shared hosting (not reachable via HTTP)
-    $parentKey = dirname(__DIR__) . '/aliaser.key';
-    if (file_exists($parentKey)) {
-        $k = trim(file_get_contents($parentKey));
-        if (preg_match('/^[0-9a-f]{64}$/i', $k)) return $k;
-    }
-
-    // 3. Local fallback — webroot-adjacent. Generated once with 0600.
-    if (!file_exists(KEY_FILE)) {
-        $key = bin2hex(random_bytes(32));
-        file_put_contents(KEY_FILE, $key);
-        @chmod(KEY_FILE, 0600);
-    }
-    $k = trim(file_get_contents(KEY_FILE));
-    if (!preg_match('/^[0-9a-f]{64}$/i', $k)) {
-        http_response_code(500);
-        echo json_encode(['error' => 'Invalid encryption key']);
-        exit;
-    }
-    return $k;
-}
-
-// AES-256-GCM with backward-compat read of legacy AES-256-CBC payloads.
-// Format new: "gcm:<base64iv>:<base64tag>:<ciphertext>"
-// Format legacy: "<base64iv>:<ciphertext>"  (CBC, no tag)
-function encryptData($data) {
-    $key = hex2bin(getEncryptionKey());
-    $iv  = random_bytes(12);
-    $tag = '';
-    $enc = openssl_encrypt(json_encode($data), 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
-    if ($enc === false) return false;
-    return 'gcm:' . base64_encode($iv) . ':' . base64_encode($tag) . ':' . base64_encode($enc);
-}
-
-function decryptData($str) {
-    $key = hex2bin(getEncryptionKey());
-    if (str_starts_with($str, 'gcm:')) {
-        $parts = explode(':', $str, 4);
-        if (count($parts) !== 4) return null;
-        $iv  = base64_decode($parts[1]);
-        $tag = base64_decode($parts[2]);
-        $ct  = base64_decode($parts[3]);
-        $dec = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
-        return ($dec !== false) ? json_decode($dec, true) : null;
-    }
-    // Legacy CBC
-    $parts = explode(':', $str, 2);
-    if (count($parts) !== 2) return null;
-    $iv  = base64_decode($parts[0]);
-    $dec = openssl_decrypt($parts[1], 'AES-256-CBC', $key, 0, $iv);
-    return ($dec !== false) ? json_decode($dec, true) : null;
-}
+// File constants and crypto helpers (getEncryptionKey / encryptData /
+// decryptData) now live in auth.php, which is required at the top of this file.
 
 // ── Credentials helpers ───────────────────────────────────────────────────────
 function readCredentials() {
@@ -297,6 +221,37 @@ function resolveAccountSecret($accountId, $field) {
     $a = $c['perAccount'][$accountId] ?? null;
     if (is_array($a) && !empty($a[$field])) return $a[$field];
     return '';
+}
+
+// ── CSRF token (web session) ──────────────────────────────────────────────────
+if ($method === 'GET' && ($_GET['action'] ?? '') === 'csrf') {
+    header('Cache-Control: no-store, no-cache, must-revalidate');
+    echo json_encode(['csrf' => auth_csrf_token()]);
+    exit();
+}
+
+// ── Logout ────────────────────────────────────────────────────────────────────
+if ($method === 'POST' && ($_GET['action'] ?? '') === 'logout') {
+    auth_logout();
+    echo json_encode(['ok' => true]);
+    exit();
+}
+
+// ── Device tokens (extensions) — web session only ─────────────────────────────
+if (($_GET['action'] ?? '') === 'device-tokens') {
+    if (($GLOBALS['auth_via'] ?? '') !== 'session') {
+        http_response_code(403); echo json_encode(['error' => 'Web session required']); exit();
+    }
+    if ($method === 'GET') {
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        echo json_encode(['tokens' => auth_list_device_tokens()]); exit();
+    }
+    if ($method === 'POST') {
+        $in = json_decode($rawInput, true);
+        if (!is_array($in)) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
+        if (!empty($in['revoke'])) { echo json_encode(['ok' => auth_revoke_device_token($in['revoke'])]); exit(); }
+        echo json_encode(['token' => auth_add_device_token($in['label'] ?? 'Extension')]); exit();
+    }
 }
 
 // ── State routes ──────────────────────────────────────────────────────────────

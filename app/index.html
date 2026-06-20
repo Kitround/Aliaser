@@ -158,6 +158,26 @@
           <button class="btn btn-secondary btn-sm" id="btn-add-cf-account">+ Cloudflare</button>
           <button class="btn btn-secondary btn-sm" id="btn-add-haltman-account">+ Haltman</button>
         </div>
+
+        <div class="section-label section-label-provider">Security</div>
+        <div class="btn-row btn-row-wrap">
+          <button class="btn btn-secondary btn-sm" id="btn-manage-tokens">Extension tokens</button>
+          <button class="btn btn-secondary btn-sm" id="btn-logout">Log out</button>
+        </div>
+      </div>
+
+      <!-- Extension device tokens -->
+      <div class="settings-section" id="section-device-tokens" style="display:none">
+        <div class="field-hint-text">Device tokens let the Chrome/Firefox extension reach this server. Generate one, paste it into the extension's Options. Tokens are shown once and can be revoked anytime.</div>
+        <div class="field">
+          <div class="section-label">New token label</div>
+          <input class="field-input" id="device-token-label" type="text" placeholder="e.g. My laptop Chrome" autocomplete="off">
+        </div>
+        <button class="btn btn-primary btn-sm" id="btn-create-token">Generate token</button>
+        <div class="auth-url-box" id="device-token-reveal" style="display:none"></div>
+        <div class="section-label">Active tokens</div>
+        <div id="device-token-list"></div>
+        <div class="btn-row"><button class="btn btn-ghost btn-sm" id="btn-back-tokens">Back</button></div>
       </div>
 
       <!-- Edit account form -->

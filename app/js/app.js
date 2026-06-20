@@ -21,10 +21,25 @@ const state={
 };
 const PROXY='./proxy.php';
 
+// ── Auth wiring ───────────────────────────────────────────────────────────────
+// 401 from the proxy → session gone/expired → bounce to the login page.
+// Writes carry the session CSRF token (fetched once via ?action=csrf).
+let _csrf='';
+function _redirectLogin(){location.href='login.php';}
+function _checkAuth(res){if(res&&res.status===401){_redirectLogin();throw new Error('Authentication required');}return res;}
+function _writeHeaders(){return{'Content-Type':'application/json','X-CSRF-Token':_csrf};}
+async function loadCsrf(){
+  try{
+    const r=await fetch(PROXY+'?action=csrf',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}});
+    if(r.status===401){_redirectLogin();return;}
+    const d=await r.json();_csrf=d&&d.csrf?d.csrf:'';
+  }catch(e){console.error('Failed to load CSRF token:',e);}
+}
+
 // ── Server state ──────────────────────────────────────────────────────────────
 async function loadServerState(){
   try{
-    const res=await fetch(PROXY+'?action=state',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}});
+    const res=_checkAuth(await fetch(PROXY+'?action=state',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}}));
     const data=await res.json();
     state.accounts=data.accounts||[];
     state.ovhZimbraPlatformIds=data.zimbraPlatformIds||{};
@@ -64,7 +79,7 @@ async function saveServerState(){
     disabledAliases:allDisabled,
   };
   try{
-    await fetch(PROXY+'?action=state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    _checkAuth(await fetch(PROXY+'?action=state',{method:'POST',headers:_writeHeaders(),body:JSON.stringify(payload)}));
   }catch(e){console.error('Failed to save server state:',e);}
 }
 
@@ -72,28 +87,28 @@ async function saveServerState(){
 // ── Notes persistence ─────────────────────────────────────────────────────────
 async function loadNotes(){
   try{
-    const res=await fetch(PROXY+'?action=notes',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}});
+    const res=_checkAuth(await fetch(PROXY+'?action=notes',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}}));
     const data=await res.json();
     state.notes=(data&&!Array.isArray(data))?data:{};
   }catch(e){console.error('Failed to load notes:',e);state.notes={};}
 }
 async function saveNotes(notes){
   try{
-    await fetch(PROXY+'?action=notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(notes||state.notes)});
+    _checkAuth(await fetch(PROXY+'?action=notes',{method:'POST',headers:_writeHeaders(),body:JSON.stringify(notes||state.notes)}));
   }catch(e){console.error('Failed to save notes:',e);}
 }
 
 // ── Addy contacts persistence ─────────────────────────────────────────────────
 async function loadAddyContacts(){
   try{
-    const res=await fetch(PROXY+'?action=addy-contacts',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}});
+    const res=_checkAuth(await fetch(PROXY+'?action=addy-contacts',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}}));
     const data=await res.json();
     state.addyContacts=(data&&typeof data==='object'&&!Array.isArray(data))?data:{};
   }catch(e){console.error('Failed to load addy contacts:',e);state.addyContacts={};}
 }
 async function saveAddyContacts(){
   try{
-    await fetch(PROXY+'?action=addy-contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(state.addyContacts)});
+    _checkAuth(await fetch(PROXY+'?action=addy-contacts',{method:'POST',headers:_writeHeaders(),body:JSON.stringify(state.addyContacts)}));
   }catch(e){console.error('Failed to save addy contacts:',e);}
 }
 function addyBuildReverseAddress(aliasEmail,recipientEmail){
@@ -107,13 +122,13 @@ function addyBuildReverseAddress(aliasEmail,recipientEmail){
 // ── Credentials persistence ───────────────────────────────────────────────────
 async function loadCredentials(){
   try{
-    const res=await fetch(PROXY+'?action=credentials',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}});
+    const res=_checkAuth(await fetch(PROXY+'?action=credentials',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}}));
     const data=await res.json();
     state.credentials=(data&&typeof data==='object'&&!Array.isArray(data))?data:{};
   }catch(e){console.error('Failed to load credentials:',e);state.credentials={};}
 }
 async function saveCredentials(creds){
-  await fetch(PROXY+'?action=credentials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(creds)});
+  _checkAuth(await fetch(PROXY+'?action=credentials',{method:'POST',headers:_writeHeaders(),body:JSON.stringify(creds)}));
 }
 
 // Save per-account tokens to encrypted credentials.json (never in state.json).
@@ -151,7 +166,8 @@ async function proxyCall(provider,method,path,body=null,extra={},retries=2){
   if(body!==null&&body!==undefined)payload.body=body;
   for(let attempt=0;attempt<=retries;attempt++){
     try{
-      const res=await fetch(PROXY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const res=await fetch(PROXY,{method:'POST',headers:_writeHeaders(),body:JSON.stringify(payload)});
+      if(res.status===401){_redirectLogin();throw new Error('Authentication required');}
       const text=await res.text();let data;try{data=JSON.parse(text)}catch{data=text||null}
       if(!res.ok){const m=data?.message||data?.error;throw new Error(m?m+' (HTTP '+res.status+')':'HTTP '+res.status);}
       return data;
@@ -192,7 +208,7 @@ async function authenticate(appKey,appSecret){
       {method:'POST',path:'/zimbra/*'},
       {method:'DELETE',path:'/zimbra/*'},
     ],redirection:'https://www.ovh.com'}};
-  const res=await fetch(PROXY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const res=_checkAuth(await fetch(PROXY,{method:'POST',headers:_writeHeaders(),body:JSON.stringify(payload)}));
   const data=await res.json();
   if(!res.ok)throw new Error(data.message||data.error||'Auth failed');
   const validationUrl=data.validationUrl||data.validation_url||data.validationURL;
@@ -1262,12 +1278,74 @@ function hideAddForms(){
   document.getElementById('section-add-cf').style.display='none';
   document.getElementById('section-add-haltman').style.display='none';
   document.getElementById('section-edit-account').style.display='none';
+  document.getElementById('section-device-tokens').style.display='none';
   document.getElementById('section-accounts').style.display='';
   document.getElementById('settings-modal-title').textContent='Settings';
   document.getElementById('close-settings').style.display='';
   document.getElementById('back-settings').style.display='none';
   renderAccountList();
 }
+
+// ── Logout + extension device tokens ──────────────────────────────────────────
+document.getElementById('btn-logout').addEventListener('click',async()=>{
+  try{await fetch(PROXY+'?action=logout',{method:'POST',headers:_writeHeaders()});}catch(e){}
+  _redirectLogin();
+});
+document.getElementById('btn-manage-tokens').addEventListener('click',()=>{
+  document.getElementById('section-accounts').style.display='none';
+  document.getElementById('section-device-tokens').style.display='flex';
+  document.getElementById('settings-modal-title').textContent='Extension tokens';
+  document.getElementById('close-settings').style.display='none';
+  document.getElementById('back-settings').style.display='';
+  document.getElementById('device-token-reveal').style.display='none';
+  document.getElementById('device-token-label').value='';
+  loadDeviceTokens();
+});
+document.getElementById('btn-back-tokens').addEventListener('click',hideAddForms);
+// Build the token list with DOM nodes (no innerHTML) — labels are user-supplied.
+function _tokenRow(t){
+  const item=document.createElement('div');item.className='account-item';
+  const info=document.createElement('div');info.className='account-item-info';
+  const name=document.createElement('div');name.className='account-item-name';name.textContent=t.label||'Token';
+  const sub=document.createElement('div');sub.className='account-item-sub';sub.textContent=new Date((t.created||0)*1000).toLocaleDateString();
+  info.append(name,sub);
+  const btn=document.createElement('button');btn.className='icon-btn danger revoke-token-btn';btn.title='Revoke';btn.dataset.id=t.id||'';
+  btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+  item.append(info,btn);
+  return item;
+}
+async function loadDeviceTokens(){
+  const el=document.getElementById('device-token-list');
+  el.textContent='';
+  const loading=document.createElement('div');loading.className='field-hint-text';loading.textContent='Loading…';el.append(loading);
+  try{
+    const res=_checkAuth(await fetch(PROXY+'?action=device-tokens',{headers:{'Cache-Control':'no-cache'}}));
+    const data=await res.json();
+    const tokens=data.tokens||[];
+    el.textContent='';
+    if(!tokens.length){const e2=document.createElement('div');e2.className='field-hint-text';e2.textContent='No tokens yet.';el.append(e2);return;}
+    tokens.forEach(t=>el.append(_tokenRow(t)));
+  }catch(e){el.textContent='';const er=document.createElement('div');er.className='field-error';er.textContent='Failed to load tokens.';el.append(er);}
+}
+document.getElementById('device-token-list').addEventListener('click',async e=>{
+  const btn=e.target.closest('.revoke-token-btn');if(!btn)return;
+  try{await fetch(PROXY+'?action=device-tokens',{method:'POST',headers:_writeHeaders(),body:JSON.stringify({revoke:btn.dataset.id})});}catch(_){}
+  loadDeviceTokens();
+});
+document.getElementById('btn-create-token').addEventListener('click',async()=>{
+  const label=document.getElementById('device-token-label').value.trim()||'Extension';
+  const btn=document.getElementById('btn-create-token');btn.disabled=true;
+  try{
+    const res=_checkAuth(await fetch(PROXY+'?action=device-tokens',{method:'POST',headers:_writeHeaders(),body:JSON.stringify({label})}));
+    const data=await res.json();
+    const box=document.getElementById('device-token-reveal');
+    box.style.display='block';box.textContent=data.token||'';box.style.cursor='pointer';box.title='Click to copy';
+    box.onclick=()=>copyText(data.token,box);
+    document.getElementById('device-token-label').value='';
+    loadDeviceTokens();
+  }catch(e){showError('Failed to create token');}
+  finally{btn.disabled=false;}
+});
 
 // OVH
 document.getElementById('btn-add-ovh-account').addEventListener('click',()=>{
@@ -2032,7 +2110,8 @@ document.addEventListener('touchstart',()=>{},{passive:true});
 const _hadCache=loadCachedAliases();
 state.isLoading=!_hadCache;
 render();
-Promise.all([loadServerState(),loadNotes(),loadCredentials(),loadAddyContacts()]).then(async()=>{
+// CSRF token first (also detects an expired session → bounce to login), then data.
+loadCsrf().then(()=>Promise.all([loadServerState(),loadNotes(),loadCredentials(),loadAddyContacts()])).then(async()=>{
   mergeCredentialsIntoAccounts();
   if(canAddAlias()){
     render();

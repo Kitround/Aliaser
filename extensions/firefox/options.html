@@ -30,6 +30,10 @@ button:hover{background:var(--accent-hover)}
 <div class="hint">URL of your Aliaser server (without trailing slash).<br>Default: <code>http://localhost:8080</code></div>
 <div class="hint" style="margin-top:10px;color:#e09040">If using an HTTP server (not localhost), Firefox's <strong style="font-weight:600">HTTPS-Only Mode</strong> may block connections. Add an exception for your server URL in <code>about:preferences#privacy</code> → HTTPS-Only Mode, or configure HTTPS on your server.</div>
 
+<label for="device-token" style="margin-top:22px">Device token</label>
+<input id="device-token" type="password" placeholder="Paste the token from the app" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+<div class="hint">Required if the server has login enabled. Generate it in the app: Settings → Security → Extension tokens.</div>
+
 <div class="row">
   <button id="btn-save">Save</button>
   <span class="status" id="save-status">Saved</span>

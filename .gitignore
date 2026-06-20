@@ -9,6 +9,8 @@ app/json/secret.key
 app/json/state.json
 app/json/notes.json
 app/json/addy-contacts.json
+app/json/auth.json
+app/json/auth-throttle.json
 
 # Docker env
 .env
