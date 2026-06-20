@@ -11,6 +11,7 @@ app/json/notes.json
 app/json/addy-contacts.json
 app/json/auth.json
 app/json/auth-throttle.json
+app/json/sessions/
 
 # Docker env
 .env

@@ -34,8 +34,9 @@ define('THROTTLE_FILE',      __DIR__ . '/json/auth-throttle.json');
 // Tunables
 define('AUTH_MAX_FAILS',      5);        // failed logins before lockout
 define('AUTH_LOCK_SECONDS',   300);      // lockout duration (5 min)
-define('AUTH_IDLE_SECONDS',   3600);     // session idle timeout (1 h)
-define('AUTH_ABS_SECONDS',    7 * 86400);// session absolute lifetime (7 d)
+define('AUTH_IDLE_SECONDS',   30 * 86400);// session idle timeout (30 d) — stay signed in
+define('AUTH_ABS_SECONDS',    90 * 86400);// session absolute lifetime (90 d)
+define('SESSION_LIFETIME',    AUTH_IDLE_SECONDS); // persistent cookie + GC lifetime
 
 // ── Encryption (canonical; shared with proxy.php) ─────────────────────────────
 function getEncryptionKey() {
@@ -502,15 +503,23 @@ function aliaser_is_https() {
 }
 function aliaser_session_start() {
     if (session_status() === PHP_SESSION_ACTIVE) return;
+    // Store session files on the mounted volume so they survive container
+    // restarts/redeploys (default /tmp is wiped → everyone logged out).
+    $sdir = __DIR__ . '/json/sessions';
+    if (is_dir($sdir) || @mkdir($sdir, 0700, true)) {
+        if (is_writable($sdir)) { @chmod($sdir, 0700); session_save_path($sdir); }
+    }
+    // Keep the server-side session alive as long as the cookie — the PHP default
+    // GC (gc_maxlifetime 1440s = 24 min) would otherwise delete it and log out.
+    ini_set('session.gc_maxlifetime', (string)SESSION_LIFETIME);
     ini_set('session.use_strict_mode', '1');
     ini_set('session.cookie_httponly', '1');
     // SameSite=Lax (not Strict): lets the session survive a top-level navigation
-    // from outside (bookmark / installed-PWA launch / external link) so the user
-    // isn't bounced to login spuriously. CSRF is still fully covered — writes
-    // require the X-CSRF-Token header, and Lax never sends the cookie on
-    // cross-site POST/subresource requests.
+    // from outside (bookmark / installed-PWA launch / external link). CSRF is
+    // still fully covered — writes require the X-CSRF-Token header, and Lax never
+    // sends the cookie on cross-site POST/subresource requests.
     session_set_cookie_params([
-        'lifetime' => 0,
+        'lifetime' => SESSION_LIFETIME,   // persistent cookie — survives PWA/browser close
         'path'     => '/',
         'httponly' => true,
         'samesite' => 'Lax',
