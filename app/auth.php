@@ -107,7 +107,7 @@ function auth_read() {
 function auth_write($data) {
     $p = encryptData($data);
     if ($p === false) return false;
-    $r = file_put_contents(AUTH_FILE, $p);
+    $r = file_put_contents(AUTH_FILE, $p, LOCK_EX);
     if ($r !== false) @chmod(AUTH_FILE, 0600);
     return $r;
 }
@@ -415,7 +415,9 @@ function webauthn_assertion_options() {
         'challenge'        => b64url_encode($challenge),
         'rpId'             => webauthn_rp_id(),
         'timeout'          => 60000,
-        'userVerification' => 'preferred',
+        // Passwordless: require user verification (biometric/PIN) so the passkey
+        // is a real factor (the user), not just possession of an unlocked device.
+        'userVerification' => 'required',
         'allowCredentials' => $allow,
     ];
 }
@@ -436,7 +438,9 @@ function webauthn_assertion_verify($resp) {
     $authData = b64url_decode($resp['response']['authenticatorData'] ?? '');
     if (strlen($authData) < 37) return 'Bad authData';
     if (!hash_equals(hash('sha256', webauthn_rp_id(), true), substr($authData, 0, 32))) return 'rpId mismatch';
-    if (!(ord($authData[32]) & 0x01)) return 'User not present';
+    $flags = ord($authData[32]);
+    if (!($flags & 0x01)) return 'User not present';
+    if (!($flags & 0x04)) return 'User verification required';   // passwordless ⇒ UV mandatory
 
     $sig = b64url_decode($resp['response']['signature'] ?? '');
     $signedData = $authData . hash('sha256', $clientDataJson, true);
@@ -472,7 +476,7 @@ function auth_throttle_read() {
     return is_array($d) ? $d : [];
 }
 function auth_throttle_write($d) {
-    $r = file_put_contents(THROTTLE_FILE, json_encode($d));
+    $r = file_put_contents(THROTTLE_FILE, json_encode($d), LOCK_EX);
     if ($r !== false) @chmod(THROTTLE_FILE, 0600);
 }
 function auth_lock_remaining() {

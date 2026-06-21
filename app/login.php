@@ -66,7 +66,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $username = trim($_POST['username'] ?? '');
         $pw  = (string)($_POST['password'] ?? '');
         $pw2 = (string)($_POST['password2'] ?? '');
-        if (strlen($username) < 3)        $error = 'Username must be at least 3 characters.';
+        $setupTok = getenv('ALIASER_SETUP_TOKEN');
+        $needTok  = ($setupTok !== false && $setupTok !== '');
+        if ($needTok && !hash_equals((string)$setupTok, (string)($_POST['setup_token'] ?? '')))
+                                          $error = 'Invalid setup token.';
+        elseif (strlen($username) < 3)    $error = 'Username must be at least 3 characters.';
         elseif (strlen($pw) < 10)         $error = 'Password must be at least 10 characters.';
         elseif ($pw !== $pw2)             $error = 'Passwords do not match.';
         else {
@@ -193,11 +197,15 @@ $csrf = form_csrf();
 
   <?php if ($error): ?><div class="err"><?= h($error) ?></div><?php endif; ?>
 
-  <?php if ($stage === 'setup'): ?>
+  <?php if ($stage === 'setup'): $needSetupTok = (getenv('ALIASER_SETUP_TOKEN') !== false && getenv('ALIASER_SETUP_TOKEN') !== ''); ?>
     <div class="sub">First run — create your admin account. You'll set up two-factor authentication next.</div>
     <form method="post" autocomplete="off">
       <input type="hidden" name="csrf" value="<?= h($csrf) ?>">
       <input type="hidden" name="action" value="setup">
+      <?php if ($needSetupTok): ?>
+      <label>Setup token</label>
+      <input name="setup_token" type="password" autocomplete="off" required>
+      <?php endif; ?>
       <label>Username</label>
       <input name="username" type="text" autocapitalize="none" autocomplete="username" required>
       <label>Password <span style="text-transform:none;opacity:.6">(min 10 chars)</span></label>

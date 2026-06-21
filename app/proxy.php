@@ -142,7 +142,7 @@ function writeCredentials($data) {
     $filtered['perAccount'] = $perAccount;
     $payload = encryptData($filtered);
     if ($payload === false) return false;
-    $result = file_put_contents(CREDS_FILE, $payload);
+    $result = file_put_contents(CREDS_FILE, $payload, LOCK_EX);
     if ($result !== false) @chmod(CREDS_FILE, 0600);
     return $result;
 }
@@ -181,7 +181,7 @@ function readState() {
 }
 
 function writeState($data) {
-    $result = file_put_contents(STATE_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    $result = file_put_contents(STATE_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
     if ($result !== false) @chmod(STATE_FILE, 0600);
     return $result;
 }
@@ -195,7 +195,7 @@ function readNotes() {
 
 function writeNotes($data) {
     if (array_values($data) === $data) $data = (object)[];
-    $result = file_put_contents(NOTES_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    $result = file_put_contents(NOTES_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
     if ($result !== false) @chmod(NOTES_FILE, 0600);
     return $result;
 }
@@ -209,7 +209,7 @@ function readAddyContacts() {
 
 function writeAddyContacts($data) {
     if (array_values($data) === $data) $data = (object)[];
-    $result = file_put_contents(ADDY_CONTACTS_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    $result = file_put_contents(ADDY_CONTACTS_FILE, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
     if ($result !== false) @chmod(ADDY_CONTACTS_FILE, 0600);
     return $result;
 }
