@@ -21,6 +21,9 @@ docker/.env
 CLAUDE.md
 .claude/
 
+# Local-only test harness (kept off GitHub)
+tests/
+
 # Editor
 .vscode/
 .idea/
