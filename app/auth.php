@@ -22,6 +22,11 @@
 
 umask(0077);
 
+// Never leak PHP warnings/notices/stack traces to clients (info disclosure,
+// and they would corrupt JSON responses / "headers already sent"). Keep logging.
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
 // ── Persisted file paths (canonical — proxy.php relies on these) ───────────────
 define('STATE_FILE',         __DIR__ . '/json/state.json');
 define('NOTES_FILE',         __DIR__ . '/json/notes.json');
@@ -175,13 +180,19 @@ function auth_totp_code($secretB32, $ts = null) {
     return str_pad((string)($part % 1000000), 6, '0', STR_PAD_LEFT);
 }
 function auth_totp_verify($secretB32, $code, $window = 1) {
+    return auth_totp_match_step($secretB32, $code, $window) !== null;
+}
+// Returns the matching time-step (counter) or null. Used for replay defence:
+// a given code maps to one step, which must be greater than the last accepted.
+function auth_totp_match_step($secretB32, $code, $window = 1) {
     $code = preg_replace('/\D/', '', (string)$code);
-    if (strlen($code) !== 6) return false;
+    if (strlen($code) !== 6) return null;
     $ts = time();
     for ($i = -$window; $i <= $window; $i++) {
-        if (hash_equals(auth_totp_code($secretB32, $ts + $i * 30), $code)) return true;
+        $t = $ts + $i * 30;
+        if (hash_equals(auth_totp_code($secretB32, $t), $code)) return intdiv($t, 30);
     }
-    return false;
+    return null;
 }
 function auth_totp_uri($secretB32, $account, $issuer = 'Aliaser') {
     return 'otpauth://totp/' . rawurlencode($issuer . ':' . $account)
@@ -194,8 +205,8 @@ function auth_totp_uri($secretB32, $account, $issuer = 'Aliaser') {
 function auth_generate_backup_codes($n = 8) {
     $codes = [];
     for ($i = 0; $i < $n; $i++) {
-        $raw = strtoupper(bin2hex(random_bytes(4))); // 8 hex chars
-        $codes[] = substr($raw, 0, 4) . '-' . substr($raw, 4, 4);
+        $raw = strtoupper(bin2hex(random_bytes(5))); // 10 hex chars = 40 bits
+        $codes[] = substr($raw, 0, 5) . '-' . substr($raw, 5, 5);
     }
     return $codes;
 }
@@ -219,8 +230,16 @@ function auth_consume_backup_code($code) {
 function auth_verify_second_factor($code) {
     $a = auth_read();
     $secret = $a['user']['totpSecret'] ?? '';
-    if ($secret === '') return false;
-    if (auth_totp_verify($secret, $code)) return true;
+    if ($secret !== '') {
+        $step = auth_totp_match_step($secret, $code);
+        if ($step !== null) {
+            // Replay defence: each code's time-step is single-use.
+            if ($step <= ($a['user']['totpLastStep'] ?? 0)) return false;
+            $a['user']['totpLastStep'] = $step;
+            auth_write($a);
+            return true;
+        }
+    }
     // Fall back to a one-time backup code.
     return auth_consume_backup_code($code);
 }

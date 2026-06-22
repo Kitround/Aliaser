@@ -20,6 +20,9 @@ RUN printf '<Directory /var/www/html/json>\n    Require all denied\n    Options 
 COPY docker/security-headers.conf /etc/apache2/conf-available/aliaser-headers.conf
 RUN a2enconf aliaser-headers
 
+# PHP hardening (no error output to clients, hide version).
+COPY docker/php-hardening.ini /usr/local/etc/php/conf.d/zz-aliaser-hardening.ini
+
 # Copy application files from app/ subfolder
 COPY app/ /var/www/html/
 
