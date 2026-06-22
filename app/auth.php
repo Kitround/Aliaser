@@ -519,6 +519,17 @@ function auth_reset_fails() {
     auth_throttle_write($t);
 }
 
+// ── Audit log ─────────────────────────────────────────────────────────────────
+// One JSON line per security-relevant event to the PHP error log (Apache /
+// container stderr). Never logs secrets, passwords, codes or tokens.
+function auth_log($event, $extra = []) {
+    $line = array_merge(
+        ['ts' => date('c'), 'event' => $event, 'ip' => $_SERVER['REMOTE_ADDR'] ?? '-'],
+        is_array($extra) ? $extra : []
+    );
+    error_log('ALIASER_AUDIT ' . json_encode($line));
+}
+
 // ── Sessions ──────────────────────────────────────────────────────────────────
 function aliaser_is_https() {
     return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')

@@ -44,6 +44,17 @@ if ($isExtOrigin) {
 
 header('Content-Type: application/json');
 
+// ── Health check (unauthenticated, no sensitive info) ────────────────────────
+// For container/readiness probes. Verifies the data dir is writable. Returns
+// only a status string — no paths, versions or config.
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'health') {
+    header('Cache-Control: no-store');
+    $ok = is_dir(__DIR__ . '/json') && is_writable(__DIR__ . '/json');
+    http_response_code($ok ? 200 : 503);
+    echo json_encode(['status' => $ok ? 'ok' : 'degraded']);
+    exit();
+}
+
 // ── Authentication gate (web session OR extension device token) ──────────────
 aliaser_require_auth();
 
@@ -119,6 +130,10 @@ function readCredentials() {
 // Accounts present in $data['perAccount'] are kept; accounts NOT present are
 // dropped (so account removal still works — frontend rebuilds the full set).
 function writeCredentials($data) {
+    // Serialize the whole read-modify-write so concurrent saves can't clobber
+    // each other (the per-field merge below reads existing secrets first).
+    $lock = fopen(CREDS_FILE . '.lock', 'c');
+    if ($lock) flock($lock, LOCK_EX);
     $existing = readCredentials();
     $allowedGlobal = ['ovhAppKey', 'ovhAppSecret', 'infomaniakToken', 'simpleloginToken', 'addyToken', 'cloudflareToken'];
     $filtered = [];
@@ -144,6 +159,7 @@ function writeCredentials($data) {
     if ($payload === false) return false;
     $result = file_put_contents(CREDS_FILE, $payload, LOCK_EX);
     if ($result !== false) @chmod(CREDS_FILE, 0600);
+    if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
     return $result;
 }
 

@@ -1121,7 +1121,7 @@ function renderSettingsStatus(){
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
-function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 function showError(msg){document.getElementById('error-text').textContent=msg;document.getElementById('error-banner').classList.add('visible');setTimeout(()=>document.getElementById('error-banner').classList.remove('visible'),5000)}
 function hideError(){document.getElementById('error-banner').classList.remove('visible')}
 

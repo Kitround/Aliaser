@@ -39,9 +39,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_GET['action'] ?? '', ['p
     if ($res === true) {
         auth_reset_fails();
         auth_establish_session(auth_username());
+        auth_log('login_ok', ['method' => 'passkey']);
         echo json_encode(['ok' => true, 'redirect' => './']); exit;
     }
     auth_record_fail();
+    auth_log('passkey_fail');
     http_response_code(400); echo json_encode(['error' => is_string($res) ? $res : 'Verification failed']); exit;
 }
 
@@ -108,6 +110,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'login' && $hasUser) {
         if (auth_is_locked()) {
+            http_response_code(429);
+            auth_log('lockout', ['stage' => 'login']);
             $error = 'Too many attempts. Try again in ' . ceil(auth_lock_remaining() / 60) . ' min.';
         } else {
             $username = trim($_POST['username'] ?? '');
@@ -127,12 +131,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } else {
                 auth_record_fail();
+                auth_log('login_fail');
                 $error = 'Invalid username or password.';
                 $stage = 'login';
             }
         }
     } elseif ($action === 'twofa' && !empty($_SESSION['pending_user'])) {
         if (auth_is_locked()) {
+            http_response_code(429);
+            auth_log('lockout', ['stage' => '2fa']);
             $error = 'Too many attempts. Try again in ' . ceil(auth_lock_remaining() / 60) . ' min.';
             $stage = 'twofa';
         } elseif (auth_verify_second_factor($_POST['code'] ?? '')) {
@@ -140,10 +147,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $_SESSION['pending_user'];
             unset($_SESSION['pending_user']);
             auth_establish_session($user);
+            auth_log('login_ok');
             header('Location: ./');
             exit;
         } else {
             auth_record_fail();
+            auth_log('2fa_fail');
             $error = 'Invalid code.';
             $stage = 'twofa';
         }

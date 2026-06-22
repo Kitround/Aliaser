@@ -29,7 +29,7 @@ function authHeaders(extra) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
-function esc(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function esc(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function setHTML(el, html) {
   const doc = new DOMParser().parseFromString(`<!DOCTYPE html><body>${html}`, 'text/html');
   el.replaceChildren(...Array.from(doc.body.childNodes));

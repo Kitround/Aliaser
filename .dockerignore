@@ -11,6 +11,7 @@ app/json/addy-contacts.json
 app/json/auth.json
 app/json/auth-throttle.json
 app/json/sessions/
+app/json/*.lock
 
 # Extensions (not served by the app)
 extensions/

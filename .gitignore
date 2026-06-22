@@ -12,6 +12,7 @@ app/json/addy-contacts.json
 app/json/auth.json
 app/json/auth-throttle.json
 app/json/sessions/
+app/json/*.lock
 
 # Docker env
 .env
