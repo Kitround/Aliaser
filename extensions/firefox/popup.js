@@ -323,11 +323,14 @@ async function slCreateAlias(acc, prefix = '', note = '') {
   // Always fetch fresh options to avoid expired signed_suffix tokens
   delete ps.slOptions[acc.id];
   const opts = await slGetOptions(acc);
-  // Match by plain suffix (stable)
+  // Match by domain — shared-domain suffixes carry a random word that changes each fetch
   const plainSuffix = ps.selectedSuffix[acc.id]?.suffix || null;
   let chosen;
   if (plainSuffix) {
-    chosen = opts.suffixes.find(s => s.suffix === plainSuffix) || opts.suffixes[0];
+    const domain = plainSuffix.slice(plainSuffix.indexOf('@'));
+    chosen = opts.suffixes.find(s => s.suffix === plainSuffix)
+          || opts.suffixes.find(s => s.suffix.endsWith(domain))
+          || opts.suffixes[0];
   } else {
     chosen = opts.suffixes[0];
   }
