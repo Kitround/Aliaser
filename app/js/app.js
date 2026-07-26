@@ -1848,15 +1848,23 @@ function openAddAlias(){
     slGetOptions(acc).then(()=>{populateSlSuffixDropdown(acc); _updateAliasPreview(); }).catch(()=>{});
   });
 }
-// The panel is bottom-anchored, so iOS lifts it above the keyboard. Sizing it
-// against visualViewport (which shrinks when the keyboard opens) keeps the
-// input at the top of the panel with the results flowing downwards into
-// whatever space is left — instead of the panel outgrowing the visible area.
-function _sizeMobSearchPanel(){
-  const p=document.getElementById('mob-search-bubble'),vv=window.visualViewport;
-  if(p&&vv)p.style.height=Math.round(vv.height*.88)+'px';
+// iOS never shrinks the layout viewport for the keyboard, so bottom-fixed
+// elements land behind it — they only *looked* lifted when Safari happened to
+// scroll the page on focus, which it does not do on a refocus. --kb-inset is
+// the gap between the layout viewport bottom and the visible one, so the panel
+// and the mobile bar sit above the keyboard whether Safari scrolled or not.
+// The panel is also capped to the visible height, keeping its input on screen
+// with the results flowing downwards below it.
+function _syncMobKeyboardInset(){
+  const vv=window.visualViewport;
+  if(!vv)return;
+  const inset=Math.max(0,Math.round(window.innerHeight-vv.height-vv.offsetTop));
+  document.documentElement.style.setProperty('--kb-inset',inset+'px');
+  const p=document.getElementById('mob-search-bubble');
+  if(p)p.style.height=Math.round(vv.height*.88)+'px';
 }
-window.visualViewport?.addEventListener('resize',_sizeMobSearchPanel);
+window.visualViewport?.addEventListener('resize',_syncMobKeyboardInset);
+window.visualViewport?.addEventListener('scroll',_syncMobKeyboardInset);
 function _closeMobSearch(){
   const bubble=document.getElementById('mob-search-bubble');
   bubble.classList.remove('open');
@@ -1870,13 +1878,16 @@ document.getElementById('mob-search')?.addEventListener('click',()=>{
   const isOpen=bubble.classList.contains('open');
   if(isOpen){_closeMobSearch();}
   else{
-    _sizeMobSearchPanel();
+    _syncMobKeyboardInset();
     bubble.classList.add('open');
     document.getElementById('mob-search').classList.add('active');
     document.getElementById('mob-search-input').focus();
   }
 });
 document.getElementById('mob-search-cancel')?.addEventListener('click',_closeMobSearch);
+// Refocusing the input reopens the keyboard without Safari always firing a
+// usable resize first — re-measure once it has settled.
+document.getElementById('mob-search-input')?.addEventListener('focus',()=>setTimeout(_syncMobKeyboardInset,300));
 document.getElementById('mob-search-input')?.addEventListener('input',e=>{
   state.searchQuery=e.target.value;
   applyFilter();render();

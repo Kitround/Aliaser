@@ -215,7 +215,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .confirm-actions .btn{flex:1}
 /* ── Mobile bar ── */
 .mob-search-panel{display:none}
-.mobile-bar{display:none;position:fixed;bottom:36px;left:50%;transform:translateX(-50%);z-index:50;align-items:center;gap:6px;background:rgba(23,23,23,.95);border:1px solid var(--border2);border-radius:50px;padding:8px 14px;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+.mobile-bar{display:none;position:fixed;bottom:calc(36px + var(--kb-inset,0px));left:50%;transform:translateX(-50%);z-index:50;align-items:center;gap:6px;background:rgba(23,23,23,.95);border:1px solid var(--border2);border-radius:50px;padding:8px 14px;box-shadow:0 4px 20px rgba(0,0,0,.4)}
 .bar-btn{width:48px;height:48px;border-radius:50%;border:none;background:transparent;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all var(--t)}
 .bar-btn.primary{background:var(--accent);color:#fff}
 /* ── Responsive mobile ── */
@@ -238,7 +238,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .alias-actions .icon-btn{width:30px;height:30px;border:none;background:transparent !important;border-radius:0}
   .alias-actions .icon-btn svg{width:17px;height:17px}
   .field-input,.search-input{font-size:16px}
-  .mob-search-panel{display:flex;flex-direction:column;position:fixed;bottom:0;left:0;right:0;z-index:49;height:80vh;background:var(--bg);border-top:1px solid var(--border2);border-radius:16px 16px 0 0;padding:16px 16px calc(36px + 64px + 16px);transform:translateY(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);pointer-events:none}
+  .mob-search-panel{display:flex;flex-direction:column;position:fixed;bottom:var(--kb-inset,0px);left:0;right:0;z-index:49;height:80vh;background:var(--bg);border-top:1px solid var(--border2);border-radius:16px 16px 0 0;padding:16px 16px calc(36px + 64px + 16px);transform:translateY(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);pointer-events:none}
   .mob-search-panel.open{transform:translateY(0);pointer-events:all}
   .mob-search-bar{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border2);border-radius:50px;padding:10px 16px}
   .mob-search-icon{color:var(--text-dim);flex-shrink:0}
