@@ -1842,6 +1842,15 @@ function openAddAlias(){
     slGetOptions(acc).then(()=>{populateSlSuffixDropdown(acc); _updateAliasPreview(); }).catch(()=>{});
   });
 }
+// The panel is bottom-anchored, so iOS lifts it above the keyboard. Sizing it
+// against visualViewport (which shrinks when the keyboard opens) keeps the
+// input at the top of the panel with the results flowing downwards into
+// whatever space is left — instead of the panel outgrowing the visible area.
+function _sizeMobSearchPanel(){
+  const p=document.getElementById('mob-search-bubble'),vv=window.visualViewport;
+  if(p&&vv)p.style.height=Math.round(vv.height*.72)+'px';
+}
+window.visualViewport?.addEventListener('resize',_sizeMobSearchPanel);
 function _closeMobSearch(){
   const bubble=document.getElementById('mob-search-bubble');
   bubble.classList.remove('open');
@@ -1855,6 +1864,7 @@ document.getElementById('mob-search')?.addEventListener('click',()=>{
   const isOpen=bubble.classList.contains('open');
   if(isOpen){_closeMobSearch();}
   else{
+    _sizeMobSearchPanel();
     bubble.classList.add('open');
     document.getElementById('mob-search').classList.add('active');
     document.getElementById('mob-search-input').focus();
