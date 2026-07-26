@@ -855,21 +855,15 @@ function applyFilter(){
 function canAddAlias(){return state.accounts.length>0}
 
 // ── Render list ───────────────────────────────────────────────────────────────
-// Mirrors the rendered cards into the mobile search panel so results stay
-// visible above the keyboard (the main list sits behind it).
-function _renderMobSearchResults(html){
-  const el=document.getElementById('mob-search-results');
-  if(!el)return;
-  const active=state.searchQuery&&document.getElementById('mob-search-bubble')?.classList.contains('open');
-  el.innerHTML=active?(html||'<div class="mob-search-empty">No match</div>'):'';
+// True while the mobile search panel drives the query: matches are then shown
+// in the panel only, and the main list behind it keeps the full list.
+function _mobSearchActive(){
+  return !!state.searchQuery&&!!document.getElementById('mob-search-bubble')?.classList.contains('open');
 }
-function renderList(){
-  const hasList=canAddAlias()&&state.dataLoaded&&state.filteredAliases.length>0;
-  const listEl=document.getElementById('alias-list');
-  if(!hasList){if(listEl.innerHTML)listEl.innerHTML='';_renderMobSearchResults('');return;}
+function _aliasListHTML(list){
   let html='';
   let currentLetter='';
-  state.filteredAliases.forEach(a=>{
+  list.forEach(a=>{
     const letter=a.aliasAddress[0].toUpperCase();
     if(letter!==currentLetter){currentLetter=letter;html+=`<div class="alias-letter">${letter}</div>`;}
     const providerClass=
@@ -943,8 +937,17 @@ function renderList(){
       </div>
     </div>`;
   });
-  listEl.innerHTML=html;
-  _renderMobSearchResults(html);
+  return html;
+}
+function renderList(){
+  const ready=canAddAlias()&&state.dataLoaded;
+  const mob=_mobSearchActive();
+  const mainList=mob?state.aliases:state.filteredAliases;
+  document.getElementById('alias-list').innerHTML=ready&&mainList.length?_aliasListHTML(mainList):'';
+  const mobEl=document.getElementById('mob-search-results');
+  if(mobEl)mobEl.innerHTML=!mob?'':(ready&&state.filteredAliases.length
+    ?_aliasListHTML(state.filteredAliases)
+    :'<div class="mob-search-empty">No match</div>');
 }
 
 // ── Render settings account list ──────────────────────────────────────────────
@@ -1108,8 +1111,11 @@ function render(){
   // Show the spinner whenever we're loading and have nothing to display yet —
   // covers cold start and slow/bad connections (blank page otherwise). A
   // refresh with data already on screen keeps the list (progressive fetch).
-  const showLoading=loading&&state.filteredAliases.length===0;
-  const empty=ready&&state.dataLoaded&&!loading&&state.filteredAliases.length===0;
+  // The main list ignores the query while the mobile search panel is open, so
+  // the loading/empty states must count what that list actually shows.
+  const shownCount=(_mobSearchActive()?state.aliases:state.filteredAliases).length;
+  const showLoading=loading&&shownCount===0;
+  const empty=ready&&state.dataLoaded&&!loading&&shownCount===0;
   document.getElementById('state-loading').classList.toggle('visible',showLoading);
   document.getElementById('state-config').classList.toggle('visible',!loading&&!ready);
   document.getElementById('state-empty').classList.toggle('visible',!showLoading&&!loading&&empty);
@@ -1848,7 +1854,7 @@ function openAddAlias(){
 // whatever space is left — instead of the panel outgrowing the visible area.
 function _sizeMobSearchPanel(){
   const p=document.getElementById('mob-search-bubble'),vv=window.visualViewport;
-  if(p&&vv)p.style.height=Math.round(vv.height*.72)+'px';
+  if(p&&vv)p.style.height=Math.round(vv.height*.88)+'px';
 }
 window.visualViewport?.addEventListener('resize',_sizeMobSearchPanel);
 function _closeMobSearch(){
