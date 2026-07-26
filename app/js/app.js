@@ -1833,71 +1833,23 @@ function openAddAlias(){
     slGetOptions(acc).then(()=>{populateSlSuffixDropdown(acc); _updateAliasPreview(); }).catch(()=>{});
   });
 }
-// iOS never shrinks the layout viewport for the keyboard, so bottom-fixed
-// elements land behind it — they only *looked* lifted when Safari happened to
-// scroll the page on focus, which it does not do on a refocus. --kb-inset is
-// the gap between the layout viewport bottom and the visible one, so the search
-// panel and the mobile bar sit above the keyboard whether Safari scrolled or
-// not. --vv-offset cancels that scroll on .layout, so the alias list stays put
-// and the matches stay visible while typing.
-const KB_HEIGHT_KEY='aliaser_kb_height';
-function _syncMobKeyboardInset(){
-  const vv=window.visualViewport;
-  if(!vv)return;
-  const kb=Math.round(window.innerHeight-vv.height);
-  if(kb>100)try{localStorage.setItem(KB_HEIGHT_KEY,kb)}catch(e){}
-  document.documentElement.style.setProperty('--kb-inset',Math.max(0,kb-Math.round(vv.offsetTop))+'px');
-  document.documentElement.style.setProperty('--vv-offset',Math.round(vv.offsetTop)+'px');
-}
-// Safari only pans the viewport when the focused input would be hidden by the
-// keyboard, and that pan is what makes the app jump up and settle back (our
-// counter-offset can only react after the event). Lifting the panel by the last
-// measured keyboard height *before* focusing keeps the input visible from the
-// start, so there is no pan and nothing moves. First ever open has no
-// measurement yet and still pans once.
-function _preLiftMobSearch(){
-  let kb=0;
-  try{kb=parseInt(localStorage.getItem(KB_HEIGHT_KEY)||'0',10)}catch(e){}
-  if(kb>100)document.documentElement.style.setProperty('--kb-inset',kb+'px');
-}
-window.visualViewport?.addEventListener('resize',_syncMobKeyboardInset);
-window.visualViewport?.addEventListener('scroll',_syncMobKeyboardInset);
-function _closeMobSearch(){
-  const bubble=document.getElementById('mob-search-bubble');
-  bubble.classList.remove('open');
-  document.getElementById('mob-search').classList.remove('active');
-  document.getElementById('mob-search-input').value='';
-  // Drop the pre-lift straight away — the keyboard may never have opened, in
-  // which case no resize event will come to reset it.
-  document.documentElement.style.setProperty('--kb-inset','0px');
-  state.searchQuery='';
-  applyFilter();render();
-}
-document.getElementById('mob-search')?.addEventListener('click',()=>{
-  const bubble=document.getElementById('mob-search-bubble');
-  const isOpen=bubble.classList.contains('open');
-  if(isOpen){_closeMobSearch();}
-  else{
-    _preLiftMobSearch();
-    bubble.classList.add('open');
-    document.getElementById('mob-search').classList.add('active');
-    document.getElementById('mob-search-input').focus({preventScroll:true});
-  }
-});
-document.getElementById('mob-search-cancel')?.addEventListener('click',_closeMobSearch);
-// Refocusing after a blur reopens the keyboard — same pre-lift, then re-measure
-// once it has settled.
-document.getElementById('mob-search-input')?.addEventListener('focus',()=>{
-  _preLiftMobSearch();
-  setTimeout(_syncMobKeyboardInset,300);
-});
-document.getElementById('mob-search-input')?.addEventListener('input',e=>{
+// ── Mobile search bar (under the topbar) ─────────────────────────────────────
+const _mobSearchInput=document.getElementById('mob-search-input');
+const _mobSearchClear=document.getElementById('mob-search-clear');
+_mobSearchInput?.addEventListener('input',e=>{
   state.searchQuery=e.target.value;
+  if(_mobSearchClear)_mobSearchClear.style.display=e.target.value?'':'none';
   applyFilter();render();
   // Matches are rendered at the top of the list — make sure that is what the
   // user is looking at, whatever they had scrolled to before searching.
   const sc=document.querySelector('.content-scroll');
   if(sc)sc.scrollTop=0;
+});
+_mobSearchClear?.addEventListener('click',()=>{
+  _mobSearchInput.value='';
+  _mobSearchClear.style.display='none';
+  state.searchQuery='';
+  applyFilter();render();
 });
 ['btn-add','mob-add'].forEach(id=>document.getElementById(id)?.addEventListener('click',openAddAlias));
 document.getElementById('modal-add').addEventListener('click',e=>{if(e.target===document.getElementById('modal-add')&&_canCloseOverlay()){setThemeColor(false);document.getElementById('modal-add').classList.remove('open');}});
