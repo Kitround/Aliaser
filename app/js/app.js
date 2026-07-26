@@ -1840,12 +1840,25 @@ function openAddAlias(){
 // panel and the mobile bar sit above the keyboard whether Safari scrolled or
 // not. --vv-offset cancels that scroll on .layout, so the alias list stays put
 // and the matches stay visible while typing.
+const KB_HEIGHT_KEY='aliaser_kb_height';
 function _syncMobKeyboardInset(){
   const vv=window.visualViewport;
   if(!vv)return;
-  const inset=Math.max(0,Math.round(window.innerHeight-vv.height-vv.offsetTop));
-  document.documentElement.style.setProperty('--kb-inset',inset+'px');
+  const kb=Math.round(window.innerHeight-vv.height);
+  if(kb>100)try{localStorage.setItem(KB_HEIGHT_KEY,kb)}catch(e){}
+  document.documentElement.style.setProperty('--kb-inset',Math.max(0,kb-Math.round(vv.offsetTop))+'px');
   document.documentElement.style.setProperty('--vv-offset',Math.round(vv.offsetTop)+'px');
+}
+// Safari only pans the viewport when the focused input would be hidden by the
+// keyboard, and that pan is what makes the app jump up and settle back (our
+// counter-offset can only react after the event). Lifting the panel by the last
+// measured keyboard height *before* focusing keeps the input visible from the
+// start, so there is no pan and nothing moves. First ever open has no
+// measurement yet and still pans once.
+function _preLiftMobSearch(){
+  let kb=0;
+  try{kb=parseInt(localStorage.getItem(KB_HEIGHT_KEY)||'0',10)}catch(e){}
+  if(kb>100)document.documentElement.style.setProperty('--kb-inset',kb+'px');
 }
 window.visualViewport?.addEventListener('resize',_syncMobKeyboardInset);
 window.visualViewport?.addEventListener('scroll',_syncMobKeyboardInset);
@@ -1854,6 +1867,9 @@ function _closeMobSearch(){
   bubble.classList.remove('open');
   document.getElementById('mob-search').classList.remove('active');
   document.getElementById('mob-search-input').value='';
+  // Drop the pre-lift straight away — the keyboard may never have opened, in
+  // which case no resize event will come to reset it.
+  document.documentElement.style.setProperty('--kb-inset','0px');
   state.searchQuery='';
   applyFilter();render();
 }
@@ -1862,16 +1878,19 @@ document.getElementById('mob-search')?.addEventListener('click',()=>{
   const isOpen=bubble.classList.contains('open');
   if(isOpen){_closeMobSearch();}
   else{
-    _syncMobKeyboardInset();
+    _preLiftMobSearch();
     bubble.classList.add('open');
     document.getElementById('mob-search').classList.add('active');
-    document.getElementById('mob-search-input').focus();
+    document.getElementById('mob-search-input').focus({preventScroll:true});
   }
 });
 document.getElementById('mob-search-cancel')?.addEventListener('click',_closeMobSearch);
-// Refocusing the input reopens the keyboard without Safari always firing a
-// usable resize first — re-measure once it has settled.
-document.getElementById('mob-search-input')?.addEventListener('focus',()=>setTimeout(_syncMobKeyboardInset,300));
+// Refocusing after a blur reopens the keyboard — same pre-lift, then re-measure
+// once it has settled.
+document.getElementById('mob-search-input')?.addEventListener('focus',()=>{
+  _preLiftMobSearch();
+  setTimeout(_syncMobKeyboardInset,300);
+});
 document.getElementById('mob-search-input')?.addEventListener('input',e=>{
   state.searchQuery=e.target.value;
   applyFilter();render();
