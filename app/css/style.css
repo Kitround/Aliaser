@@ -231,7 +231,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .brand-sep{display:none}
   .topbar-right{display:none}
   .mobile-bar{display:flex}
-  .content-scroll{padding:13px 12px 180px}
+  /* Fade the cards out under the search bar instead of cutting them flat. */
+  .content-scroll{padding:13px 12px 180px;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 32px);mask-image:linear-gradient(to bottom,transparent 0,#000 32px)}
   #alias-list{grid-template-columns:1fr}
   .alias-letter{display:block;font-family:var(--mono);font-size:.6rem;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.12em;padding:4px 0 2px;margin-top:6px;opacity:.5}
   .alias-actions{display:grid;grid-template-columns:repeat(2,30px);gap:2px}
