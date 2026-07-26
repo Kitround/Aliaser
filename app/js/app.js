@@ -855,10 +855,18 @@ function applyFilter(){
 function canAddAlias(){return state.accounts.length>0}
 
 // ── Render list ───────────────────────────────────────────────────────────────
+// Mirrors the rendered cards into the mobile search panel so results stay
+// visible above the keyboard (the main list sits behind it).
+function _renderMobSearchResults(html){
+  const el=document.getElementById('mob-search-results');
+  if(!el)return;
+  const active=state.searchQuery&&document.getElementById('mob-search-bubble')?.classList.contains('open');
+  el.innerHTML=active?(html||'<div class="mob-search-empty">No match</div>'):'';
+}
 function renderList(){
   const hasList=canAddAlias()&&state.dataLoaded&&state.filteredAliases.length>0;
   const listEl=document.getElementById('alias-list');
-  if(!hasList){if(listEl.innerHTML)listEl.innerHTML='';return;}
+  if(!hasList){if(listEl.innerHTML)listEl.innerHTML='';_renderMobSearchResults('');return;}
   let html='';
   let currentLetter='';
   state.filteredAliases.forEach(a=>{
@@ -936,6 +944,7 @@ function renderList(){
     </div>`;
   });
   listEl.innerHTML=html;
+  _renderMobSearchResults(html);
 }
 
 // ── Render settings account list ──────────────────────────────────────────────
@@ -1975,14 +1984,16 @@ document.getElementById('btn-create-alias').addEventListener('click',async()=>{
 // ── Scroll + double-tap guard (mobile) ───────────────────────────────────────
 let _isScrolling=false,_scrollTimer=null;
 let _lastTapTime=0;
-document.querySelector('.content-scroll')?.addEventListener('scroll',()=>{
+function _markScrolling(){
   _isScrolling=true;
   clearTimeout(_scrollTimer);
   _scrollTimer=setTimeout(()=>{_isScrolling=false;},150);
-},{passive:true});
+}
+document.querySelector('.content-scroll')?.addEventListener('scroll',_markScrolling,{passive:true});
+document.getElementById('mob-search-results')?.addEventListener('scroll',_markScrolling,{passive:true});
 
 // ── Alias list clicks ─────────────────────────────────────────────────────────
-document.getElementById('alias-list').addEventListener('click',e=>{
+function _onAliasCardClick(e){
   if(_isScrolling)return;
   const now=Date.now();
   if(now-_lastTapTime<350){return;}
@@ -1998,7 +2009,9 @@ document.getElementById('alias-list').addEventListener('click',e=>{
   if(e.target.closest('.enable-btn')){e.stopPropagation();
     enableAlias(alias).catch(e=>showError('Failed to re-enable: '+e.message));return;}
   if(e.target.closest('.copy-btn'))copyText(alias.aliasAddress,card);
-});
+}
+document.getElementById('alias-list').addEventListener('click',_onAliasCardClick);
+document.getElementById('mob-search-results')?.addEventListener('click',_onAliasCardClick);
 
 // ── SL Contacts modal ────────────────────────────────────────────────────────
 let _contactsAlias=null;

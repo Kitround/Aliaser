@@ -245,6 +245,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .mob-search-input{flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:var(--mono);font-size:16px;color:var(--text)}
   .mob-search-input::placeholder{color:var(--text-dim)}
   .mob-search-cancel{background:transparent;border:none;color:var(--text-dim);cursor:pointer;display:flex;align-items:center;padding:2px;flex-shrink:0}
+  .mob-search-results{display:flex;flex-direction:column;gap:8px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-bottom:12px}
+  .mob-search-results:empty{display:none}
+  .mob-search-results .alias-letter{display:none}
+  .mob-search-empty{font-family:var(--mono);font-size:.78rem;color:var(--text-dim);text-align:center;padding:6px 0}
   .contact-actions{display:flex;flex-direction:row;gap:2px;flex-shrink:0}
   .contact-actions .icon-btn{width:30px;height:30px}
   .contact-actions .icon-btn svg{width:17px;height:17px}
