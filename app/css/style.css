@@ -214,7 +214,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .confirm-actions{display:flex;gap:7px}
 .confirm-actions .btn{flex:1}
 /* ── Mobile bar ── */
-.mob-search-bar{display:none}
+.mob-search{display:none}
 .mobile-bar{display:none;position:fixed;bottom:36px;left:50%;transform:translateX(-50%);z-index:50;align-items:center;gap:6px;background:rgba(23,23,23,.95);border:1px solid var(--border2);border-radius:50px;padding:8px 14px;box-shadow:0 4px 20px rgba(0,0,0,.4)}
 .bar-btn{width:48px;height:48px;border-radius:50%;border:none;background:transparent;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all var(--t)}
 .bar-btn.primary{background:var(--accent);color:#fff}
@@ -239,11 +239,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .alias-actions .icon-btn{width:30px;height:30px;border:none;background:transparent !important;border-radius:0}
   .alias-actions .icon-btn svg{width:17px;height:17px}
   .field-input,.search-input{font-size:16px}
-  .mob-search-bar{display:flex;align-items:center;gap:8px;margin:10px 12px 0;background:var(--bg);border:1px solid var(--border2);border-radius:50px;padding:10px 16px;flex-shrink:0}
-  .mob-search-icon{color:var(--text-dim);flex-shrink:0}
-  .mob-search-input{flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:var(--mono);font-size:16px;color:var(--text)}
-  .mob-search-input::placeholder{color:var(--text-dim)}
-  .mob-search-clear{background:transparent;border:none;color:var(--text-dim);cursor:pointer;display:flex;align-items:center;padding:2px;flex-shrink:0}
+  /* Same field as the topbar one, just laid out full width under the topbar.
+     Slower than --t on the focus ring so it fades in and out. */
+  .mob-search.search-wrap{display:block;width:auto;margin:10px 12px 0;flex-shrink:0}
+  .mob-search .search-input{padding:10px 12px 10px 32px;transition:border-color .18s ease,box-shadow .18s ease}
   .contact-actions{display:flex;flex-direction:row;gap:2px;flex-shrink:0}
   .contact-actions .icon-btn{width:30px;height:30px}
   .contact-actions .icon-btn svg{width:17px;height:17px}

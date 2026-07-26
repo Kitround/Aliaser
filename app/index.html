@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Aliaser">
 <meta name="theme-color" content="#0f0f0f" id="theme-color-meta">
-<link rel="stylesheet" href="css/style.css?v=10">
+<link rel="stylesheet" href="css/style.css?v=11">
 </head>
 </head>
 <body>
@@ -68,14 +68,14 @@
       </div>
     </div>
 
-    <!-- Mobile search bar (mobile only — desktop uses the topbar field) -->
-    <div class="mob-search-bar">
-      <svg class="mob-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+    <!-- Mobile search field — same markup as the topbar one, mobile only -->
+    <div class="search-wrap mob-search">
+      <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
         <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
       </svg>
-      <input class="mob-search-input" id="mob-search-input" type="text" placeholder="Find aliases…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
-      <button class="mob-search-clear" id="mob-search-clear" style="display:none" title="Clear">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+      <input class="search-input" id="mob-search-input" type="text" placeholder="Find aliases…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+      <button class="search-clear" id="mob-search-clear" style="display:none" title="Clear">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
       </button>
@@ -537,6 +537,6 @@
   <span id="copy-toast-text">Copied</span>
 </div>
 
-<script src="js/app.js?v=10"></script>
+<script src="js/app.js?v=11"></script>
 </body>
 </html>
