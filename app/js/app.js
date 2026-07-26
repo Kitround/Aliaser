@@ -1860,6 +1860,10 @@ function _syncMobKeyboardInset(){
   if(!vv)return;
   const inset=Math.max(0,Math.round(window.innerHeight-vv.height-vv.offsetTop));
   document.documentElement.style.setProperty('--kb-inset',inset+'px');
+  // Safari pans the visual viewport up on focus, which drags the whole app
+  // (topbar included) off the top of the screen. Pushing .layout down by the
+  // same amount cancels the pan, so only the panel moves with the keyboard.
+  document.documentElement.style.setProperty('--vv-offset',Math.round(vv.offsetTop)+'px');
   const p=document.getElementById('mob-search-bubble');
   if(p)p.style.height=Math.round(vv.height*.88)+'px';
 }

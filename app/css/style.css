@@ -18,7 +18,7 @@
 }
 html,body{height:100%}
 body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex;min-height:100dvh;overflow:hidden}
-.layout{display:flex;width:100%;height:100dvh}
+.layout{display:flex;width:100%;height:100dvh;transform:translateY(var(--vv-offset,0px))}
 .main{flex:1;display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--bg2);min-width:0}
 /* ── Topbar ── */
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:52px;border-bottom:1px solid var(--border);flex-shrink:0;gap:12px}
