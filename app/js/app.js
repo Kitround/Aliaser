@@ -855,15 +855,13 @@ function applyFilter(){
 function canAddAlias(){return state.accounts.length>0}
 
 // ── Render list ───────────────────────────────────────────────────────────────
-// True while the mobile search panel drives the query: matches are then shown
-// in the panel only, and the main list behind it keeps the full list.
-function _mobSearchActive(){
-  return !!state.searchQuery&&!!document.getElementById('mob-search-bubble')?.classList.contains('open');
-}
-function _aliasListHTML(list){
+function renderList(){
+  const hasList=canAddAlias()&&state.dataLoaded&&state.filteredAliases.length>0;
+  const listEl=document.getElementById('alias-list');
+  if(!hasList){if(listEl.innerHTML)listEl.innerHTML='';return;}
   let html='';
   let currentLetter='';
-  list.forEach(a=>{
+  state.filteredAliases.forEach(a=>{
     const letter=a.aliasAddress[0].toUpperCase();
     if(letter!==currentLetter){currentLetter=letter;html+=`<div class="alias-letter">${letter}</div>`;}
     const providerClass=
@@ -937,17 +935,7 @@ function _aliasListHTML(list){
       </div>
     </div>`;
   });
-  return html;
-}
-function renderList(){
-  const ready=canAddAlias()&&state.dataLoaded;
-  const mob=_mobSearchActive();
-  const mainList=mob?state.aliases:state.filteredAliases;
-  document.getElementById('alias-list').innerHTML=ready&&mainList.length?_aliasListHTML(mainList):'';
-  const mobEl=document.getElementById('mob-search-results');
-  if(mobEl)mobEl.innerHTML=!mob?'':(ready&&state.filteredAliases.length
-    ?_aliasListHTML(state.filteredAliases)
-    :'<div class="mob-search-empty">No match</div>');
+  listEl.innerHTML=html;
 }
 
 // ── Render settings account list ──────────────────────────────────────────────
@@ -1111,11 +1099,8 @@ function render(){
   // Show the spinner whenever we're loading and have nothing to display yet —
   // covers cold start and slow/bad connections (blank page otherwise). A
   // refresh with data already on screen keeps the list (progressive fetch).
-  // The main list ignores the query while the mobile search panel is open, so
-  // the loading/empty states must count what that list actually shows.
-  const shownCount=(_mobSearchActive()?state.aliases:state.filteredAliases).length;
-  const showLoading=loading&&shownCount===0;
-  const empty=ready&&state.dataLoaded&&!loading&&shownCount===0;
+  const showLoading=loading&&state.filteredAliases.length===0;
+  const empty=ready&&state.dataLoaded&&!loading&&state.filteredAliases.length===0;
   document.getElementById('state-loading').classList.toggle('visible',showLoading);
   document.getElementById('state-config').classList.toggle('visible',!loading&&!ready);
   document.getElementById('state-empty').classList.toggle('visible',!showLoading&&!loading&&empty);
@@ -1851,21 +1836,16 @@ function openAddAlias(){
 // iOS never shrinks the layout viewport for the keyboard, so bottom-fixed
 // elements land behind it — they only *looked* lifted when Safari happened to
 // scroll the page on focus, which it does not do on a refocus. --kb-inset is
-// the gap between the layout viewport bottom and the visible one, so the panel
-// and the mobile bar sit above the keyboard whether Safari scrolled or not.
-// The panel is also capped to the visible height, keeping its input on screen
-// with the results flowing downwards below it.
+// the gap between the layout viewport bottom and the visible one, so the search
+// panel and the mobile bar sit above the keyboard whether Safari scrolled or
+// not. --vv-offset cancels that scroll on .layout, so the alias list stays put
+// and the matches stay visible while typing.
 function _syncMobKeyboardInset(){
   const vv=window.visualViewport;
   if(!vv)return;
   const inset=Math.max(0,Math.round(window.innerHeight-vv.height-vv.offsetTop));
   document.documentElement.style.setProperty('--kb-inset',inset+'px');
-  // Safari pans the visual viewport up on focus, which drags the whole app
-  // (topbar included) off the top of the screen. Pushing .layout down by the
-  // same amount cancels the pan, so only the panel moves with the keyboard.
   document.documentElement.style.setProperty('--vv-offset',Math.round(vv.offsetTop)+'px');
-  const p=document.getElementById('mob-search-bubble');
-  if(p)p.style.height=Math.round(vv.height*.88)+'px';
 }
 window.visualViewport?.addEventListener('resize',_syncMobKeyboardInset);
 window.visualViewport?.addEventListener('scroll',_syncMobKeyboardInset);
@@ -1895,6 +1875,10 @@ document.getElementById('mob-search-input')?.addEventListener('focus',()=>setTim
 document.getElementById('mob-search-input')?.addEventListener('input',e=>{
   state.searchQuery=e.target.value;
   applyFilter();render();
+  // Matches are rendered at the top of the list — make sure that is what the
+  // user is looking at, whatever they had scrolled to before searching.
+  const sc=document.querySelector('.content-scroll');
+  if(sc)sc.scrollTop=0;
 });
 ['btn-add','mob-add'].forEach(id=>document.getElementById(id)?.addEventListener('click',openAddAlias));
 document.getElementById('modal-add').addEventListener('click',e=>{if(e.target===document.getElementById('modal-add')&&_canCloseOverlay()){setThemeColor(false);document.getElementById('modal-add').classList.remove('open');}});
@@ -2015,16 +1999,14 @@ document.getElementById('btn-create-alias').addEventListener('click',async()=>{
 // ── Scroll + double-tap guard (mobile) ───────────────────────────────────────
 let _isScrolling=false,_scrollTimer=null;
 let _lastTapTime=0;
-function _markScrolling(){
+document.querySelector('.content-scroll')?.addEventListener('scroll',()=>{
   _isScrolling=true;
   clearTimeout(_scrollTimer);
   _scrollTimer=setTimeout(()=>{_isScrolling=false;},150);
-}
-document.querySelector('.content-scroll')?.addEventListener('scroll',_markScrolling,{passive:true});
-document.getElementById('mob-search-results')?.addEventListener('scroll',_markScrolling,{passive:true});
+},{passive:true});
 
 // ── Alias list clicks ─────────────────────────────────────────────────────────
-function _onAliasCardClick(e){
+document.getElementById('alias-list').addEventListener('click',e=>{
   if(_isScrolling)return;
   const now=Date.now();
   if(now-_lastTapTime<350){return;}
@@ -2040,9 +2022,7 @@ function _onAliasCardClick(e){
   if(e.target.closest('.enable-btn')){e.stopPropagation();
     enableAlias(alias).catch(e=>showError('Failed to re-enable: '+e.message));return;}
   if(e.target.closest('.copy-btn'))copyText(alias.aliasAddress,card);
-}
-document.getElementById('alias-list').addEventListener('click',_onAliasCardClick);
-document.getElementById('mob-search-results')?.addEventListener('click',_onAliasCardClick);
+});
 
 // ── SL Contacts modal ────────────────────────────────────────────────────────
 let _contactsAlias=null;

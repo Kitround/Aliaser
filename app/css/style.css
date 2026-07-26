@@ -238,19 +238,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .alias-actions .icon-btn{width:30px;height:30px;border:none;background:transparent !important;border-radius:0}
   .alias-actions .icon-btn svg{width:17px;height:17px}
   .field-input,.search-input{font-size:16px}
-  .mob-search-panel{display:flex;flex-direction:column;position:fixed;bottom:var(--kb-inset,0px);left:0;right:0;z-index:49;height:80vh;background:var(--bg);border-top:1px solid var(--border2);border-radius:16px 16px 0 0;padding:16px 16px calc(36px + 64px + 16px);transform:translateY(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);pointer-events:none}
+  .mob-search-panel{display:block;position:fixed;bottom:var(--kb-inset,0px);left:0;right:0;z-index:49;background:var(--bg);border-top:1px solid var(--border2);border-radius:16px 16px 0 0;padding:16px 16px calc(36px + 64px + 16px);transform:translateY(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);pointer-events:none}
   .mob-search-panel.open{transform:translateY(0);pointer-events:all}
   .mob-search-bar{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border2);border-radius:50px;padding:10px 16px}
   .mob-search-icon{color:var(--text-dim);flex-shrink:0}
   .mob-search-input{flex:1;min-width:0;background:transparent;border:none;outline:none;font-family:var(--mono);font-size:16px;color:var(--text)}
   .mob-search-input::placeholder{color:var(--text-dim)}
   .mob-search-cancel{background:transparent;border:none;color:var(--text-dim);cursor:pointer;display:flex;align-items:center;padding:2px;flex-shrink:0}
-  .mob-search-results{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:12px}
-  .mob-search-results .alias-letter{display:none}
-  /* Flex children shrink by default — without this the cards get squashed and
-     the alias address is clipped when the results overflow the panel. */
-  .mob-search-results .alias-card{flex:0 0 auto}
-  .mob-search-empty{font-family:var(--mono);font-size:.78rem;color:var(--text-dim);text-align:center;padding:6px 0}
   .contact-actions{display:flex;flex-direction:row;gap:2px;flex-shrink:0}
   .contact-actions .icon-btn{width:30px;height:30px}
   .contact-actions .icon-btn svg{width:17px;height:17px}
