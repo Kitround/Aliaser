@@ -242,7 +242,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   /* Same field as the topbar one, just laid out full width under the topbar.
      Slower than --t on the focus ring so it fades in and out. */
   .mob-search.search-wrap{display:block;width:auto;margin:10px 12px 0;flex-shrink:0}
-  .mob-search .search-input{padding:10px 12px 10px 32px;transition:border-color .18s ease,box-shadow .18s ease}
+  .mob-search .search-input{padding:10px 12px 10px 37px;transition:border-color .18s ease,box-shadow .18s ease}
+  .mob-search .search-icon{width:15px;height:15px;left:14px}
   .contact-actions{display:flex;flex-direction:row;gap:2px;flex-shrink:0}
   .contact-actions .icon-btn{width:30px;height:30px}
   .contact-actions .icon-btn svg{width:17px;height:17px}
