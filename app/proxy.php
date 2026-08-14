@@ -296,7 +296,10 @@ if (in_array(($_GET['action'] ?? ''), $AUTH_MGMT, true)) {
         echo json_encode(webauthn_register_options()); exit();
     }
     if ($action === 'passkey-register-verify') {
-        $res = webauthn_register_verify($in['response'] ?? [], $in['label'] ?? 'Passkey');
+        $res = webauthn_register_verify(
+            is_array($in['response'] ?? null) ? $in['response'] : [],
+            is_string($in['label'] ?? null) ? $in['label'] : 'Passkey'
+        );
         if ($res === true) { echo json_encode(['ok' => true]); }
         else { http_response_code(400); echo json_encode(['error' => $res]); }
         exit();
@@ -411,9 +414,21 @@ if (!$input) { http_response_code(400); echo json_encode(['error' => 'Invalid JS
 $GLOBALS['input'] = $input;
 
 $provider = $input['provider']  ?? 'ovh';
-$method   = strtoupper($input['method'] ?? 'GET');
+$method   = $input['method']    ?? 'GET';
 $path     = $input['path']      ?? '';
 $body     = isset($input['body']) ? json_encode($input['body']) : '';
+
+// Every field below is attacker-controlled. Reject non-strings before they reach
+// preg_match / array offsets (TypeError → 500) and, above all, before $method
+// reaches CURLOPT_CUSTOMREQUEST: libcurl does not validate that string, so a
+// CR/LF in it rewrites the whole request line and defeats the path whitelist.
+if (!is_string($provider) || !is_string($method) || !is_string($path)) {
+    http_response_code(400); echo json_encode(['error' => 'Invalid request fields']); exit();
+}
+$method = strtoupper($method);
+if (!in_array($method, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+    http_response_code(400); echo json_encode(['error' => 'Method not allowed']); exit();
+}
 
 if (empty($path)) { http_response_code(400); echo json_encode(['error' => 'Missing required field: path']); exit(); }
 if (!function_exists('curl_init')) { http_response_code(500); echo json_encode(['error' => 'curl extension not available']); exit(); }
@@ -463,7 +478,9 @@ if (!isset($WHITELISTS[$provider])) {
 }
 $pathOk = false;
 foreach ($WHITELISTS[$provider] as $rx) {
-    if (preg_match($rx, $path)) { $pathOk = true; break; }
+    // 'D' modifier: without it PCRE lets '$' match before a trailing newline, so
+    // "/api/user_info\n" would pass the whitelist and land in the outgoing URL.
+    if (preg_match($rx . 'D', $path)) { $pathOk = true; break; }
 }
 if (!$pathOk) {
     http_response_code(403);
@@ -562,12 +579,17 @@ function ovhSignedRequest($method, $url, $appKey, $appSecret, $consumerKey, $bod
         $hdrs[] = 'X-Ovh-Signature: ' . $signature;
     }
     foreach ($extraHeaders as $h) { $hdrs[] = $h; }
+    assertSafeHeaders($hdrs);
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CUSTOMREQUEST,  $method);
     curl_setopt($ch, CURLOPT_HTTPHEADER,     $hdrs);
     curl_setopt($ch, CURLOPT_TIMEOUT,        30);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+    curl_setopt($ch, CURLOPT_PROTOCOLS,      CURLPROTO_HTTPS);
     curl_setopt($ch, CURLOPT_HEADER,         true);
     if (in_array($method, ['POST','PUT','DELETE']) && !empty($body)) {
         curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
@@ -576,7 +598,6 @@ function ovhSignedRequest($method, $url, $appKey, $appSecret, $consumerKey, $bod
     $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $hdrSize   = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
     $curlError = curl_error($ch);
-    curl_close($ch);
     if ($curlError) {
         return ['code' => 502, 'body' => json_encode(['error' => 'Network error']), 'headers' => []];
     }
@@ -657,21 +678,38 @@ function handleOVH($method, $path, $body, $input) {
     sendCurl($method, $url, $headers, $body, ['POST', 'PUT', 'DELETE']);
 }
 
+// Reject header lines carrying CR/LF (or NUL). Tokens and OVH keys reach these
+// headers from client input; libcurl copies the string verbatim, so an embedded
+// CRLF would inject arbitrary headers into the outgoing provider request.
+function assertSafeHeaders($headers) {
+    foreach ($headers as $h) {
+        if (!is_string($h) || preg_match('/[\r\n\0]/', $h)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid credential or header value']);
+            exit();
+        }
+    }
+}
+
 // ── Shared curl helper ────────────────────────────────────────────────────────
 function sendCurl($method, $url, $headers, $body, $bodyMethods) {
+    assertSafeHeaders($headers);
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false); // no redirect-driven SSRF
+    curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
     if (in_array($method, $bodyMethods) && !empty($body)) {
         curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
     }
     $response  = curl_exec($ch);
     $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch);
-    curl_close($ch);
     if ($curlError) {
         error_log('Aliaser curl error: ' . $curlError);
         http_response_code(502);

@@ -25,6 +25,10 @@ CLAUDE.md
 # Local-only test harness (kept off GitHub)
 tests/
 
+# Security audit — describes exploitable issues in detail; keep it off the
+# public repo until every deployment is upgraded.
+AUDIT.md
+
 # Editor
 .vscode/
 .idea/

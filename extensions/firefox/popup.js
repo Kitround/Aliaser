@@ -532,6 +532,8 @@ async function fetchAll() {
       case 'simplelogin': return slFetchForAccount(acc);
       case 'addy':        return addyFetchForAccount(acc);
       case 'cloudflare':  return cfFetchForAccount(acc);
+      // Haltman is dashboard-only: it yields no aliases here and shows no error.
+      // Deliberate — do not turn this into a user-facing message.
       default:            return Promise.resolve([]);
     }
   };
@@ -584,7 +586,7 @@ async function deleteAlias(alias) {
     case 'addy':        await addyDeleteAlias(alias);      break;
     case 'cloudflare':  await cfDeleteAlias(alias, acc);   break;
   }
-  ps.aliases = ps.aliases.filter(a => a.id !== alias.id);
+  ps.aliases = ps.aliases.filter(a => !(a.id === alias.id && a.accountId === alias.accountId));
   delete ps.notes[alias.aliasAddress];
   applyFilter();
   renderList();
@@ -796,7 +798,7 @@ function renderList() {
         </svg>
       </button>` : '';
 
-    return `<div class="p-item${disabled ? ' is-disabled' : ''}" data-id="${esc(a.id)}">
+    return `<div class="p-item${disabled ? ' is-disabled' : ''}" data-id="${esc(a.id)}" data-account="${esc(a.accountId)}">
       <div class="p-item-addr">
         <div class="p-item-local">${esc(local)}<span class="p-item-domain">${esc(domain)}</span></div>
         ${note ? `<div class="p-item-note">${esc(note)}</div>` : ''}
@@ -831,62 +833,6 @@ function updateCount() {
   else el.classList.remove('visible');
 }
 
-// ── Suggestions ───────────────────────────────────────────────────────────────
-function _slSortedSuffixes(acc) {
-  const opts = ps.slOptions[acc.id];
-  if (!opts?.suffixes?.length) return [];
-  const suffixes = acc.isPremium
-    ? opts.suffixes
-    : opts.suffixes.filter(s => !(s.is_custom || s.premium));
-  return [...suffixes].sort((a, b) => ((b.is_custom || b.premium) ? 1 : 0) - ((a.is_custom || a.premium) ? 1 : 0));
-}
-
-function renderSuggestions() {
-  const el   = document.getElementById('p-suggestions');
-  const wrap = document.getElementById('p-suggestion-wrap');
-  if (!el || !wrap) return;
-  const acc = ps.accounts.find(a => a.id === ps.selectedAccountId);
-  if (!acc) { wrap.style.display = 'none'; return; }
-  const MAX  = 3;
-  const rows = [];
-  if (acc.provider === 'simplelogin') {
-    const opts   = ps.slOptions[acc.id];
-    if (!opts?.suffixes?.length) { wrap.style.display = 'none'; return; }
-    const selEl  = document.getElementById('p-suffix-select');
-    const chosen = selEl?.value
-      ? (opts.suffixes.find(s => (s.signed_suffix || s['signed-suffix']) === selEl.value) || ps.selectedSuffix[acc.id] || opts.suffixes[0])
-      : (ps.selectedSuffix[acc.id] || opts.suffixes[0]);
-    const suffix = chosen?.suffix || '';
-    if (!suffix) { wrap.style.display = 'none'; return; }
-    for (let j = 0; j < MAX; j++) {
-      const name = generateAliasName();
-      rows.push({ full: name + suffix, name, isSL: false });
-    }
-  } else if (acc.provider === 'addy' && acc.isFree) {
-    wrap.style.display = 'none'; return;
-  } else {
-    const domain = acc.domain || (acc.account?.includes('@') ? acc.account.split('@')[1] : '');
-    if (!domain) { wrap.style.display = 'none'; return; }
-    for (let j = 0; j < MAX; j++) {
-      const name = generateAliasName();
-      rows.push({ full: name + '@' + domain, name, isSL: false });
-    }
-  }
-  if (!rows.length) { wrap.style.display = 'none'; return; }
-  wrap.style.display = '';
-  setHTML(el, rows.map(r =>
-    `<div class="p-suggestion-row" data-full="${esc(r.full)}" data-account-id="${esc(acc.id)}" data-name="${esc(r.name)}"><span class="p-suggestion-full">${esc(r.full)}</span></div>`
-  ).join(''));
-}
-
-document.getElementById('p-suggestions').addEventListener('click', async e => {
-  const row = e.target.closest('.p-suggestion-row');
-  if (!row) return;
-  document.getElementById('p-name').value = row.dataset.name;
-  updatePreview();
-  document.getElementById('p-create-btn').click();
-});
-
 // ── Account pills ─────────────────────────────────────────────────────────────
 function renderPills() {
   const el = document.getElementById('p-pills');
@@ -912,7 +858,6 @@ async function selectAccount(id) {
     document.getElementById('p-suffix-field').style.display = 'none';
   }
   updatePreview();
-  renderSuggestions();
 }
 
 async function loadSlOptions(acc) {
@@ -925,7 +870,8 @@ function populateSlSuffixSelect(acc) {
   const sel      = document.getElementById('p-suffix-select');
   const suffixes = ps.slOptions[acc.id]?.suffixes || [];
   if (!sel || !suffixes.length) return;
-  const sorted   = _slSortedSuffixes(acc);
+  const all      = acc.isPremium ? suffixes : suffixes.filter(s => !(s.is_custom || s.premium));
+  const sorted   = [...all].sort((a, b) => ((b.is_custom || b.premium) ? 1 : 0) - ((a.is_custom || a.premium) ? 1 : 0));
   const current  = ps.selectedSuffix[acc.id];
   setHTML(sel, sorted.map(s => {
     const label = (s.is_custom || s.premium) ? '★ ' + s.suffix : s.suffix;
@@ -1021,7 +967,7 @@ document.getElementById('p-suffix-select').addEventListener('change', function (
   const acc = ps.accounts.find(a => a.id === ps.selectedAccountId);
   if (acc) {
     const found = (ps.slOptions[acc.id]?.suffixes || []).find(s => (s.signed_suffix || s['signed-suffix']) === this.value);
-    if (found) { ps.selectedSuffix[acc.id] = found; renderSuggestions(); updatePreview(); }
+    if (found) { ps.selectedSuffix[acc.id] = found; updatePreview(); }
   }
 });
 
@@ -1060,29 +1006,53 @@ document.getElementById('p-search').addEventListener('input', e => {
 });
 
 document.getElementById('p-list').addEventListener('click', e => {
-  const id = e.target.closest('[data-id]')?.dataset.id;
-  if (!id) return;
+  // Match on id AND accountId: Infomaniak alias ids are just the local part, so
+  // the same name on two IK accounts would otherwise resolve to the wrong row.
+  const item = e.target.closest('.p-item');
+  if (!item) return;
+  const alias = ps.aliases.find(a => a.id === item.dataset.id && a.accountId === item.dataset.account);
+  if (!alias) return;
 
   if (e.target.closest('.copy-btn')) {
-    const alias = ps.aliases.find(a => a.id === id);
-    if (alias) { navigator.clipboard?.writeText(alias.aliasAddress).catch(() => {}); showToast('Copied'); }
+    navigator.clipboard?.writeText(alias.aliasAddress).catch(() => {}); showToast('Copied');
     return;
   }
-  if (e.target.closest('.contacts-btn')) {
-    const alias = ps.aliases.find(a => a.id === id);
-    if (alias) openContacts(alias);
-    return;
-  }
+  if (e.target.closest('.contacts-btn')) { openContacts(alias); return; }
   if (e.target.closest('.toggle-btn')) {
-    const alias = ps.aliases.find(a => a.id === id);
-    if (alias) toggleAlias(alias).catch(err => showError('Toggle failed: ' + err.message));
+    toggleAlias(alias).catch(err => showError('Toggle failed: ' + err.message));
     return;
   }
   if (e.target.closest('.delete-btn')) {
-    const alias = ps.aliases.find(a => a.id === id);
-    if (alias) deleteAlias(alias).catch(err => showError('Delete failed: ' + err.message));
+    askDelete(alias);
     return;
   }
+});
+
+// ── Delete confirmation ───────────────────────────────────────────────────────
+// Deleting an alias is irreversible and there is no undo, so the popup asks
+// first — the same guard the dashboard has. textContent, never innerHTML: the
+// address comes from the provider.
+let _pendingDelete = null;
+function askDelete(alias) {
+  _pendingDelete = alias;
+  document.getElementById('p-confirm-alias').textContent = alias.aliasAddress;
+  document.getElementById('p-confirm').classList.add('open');
+}
+function closeConfirm() {
+  _pendingDelete = null;
+  document.getElementById('p-confirm').classList.remove('open');
+}
+document.getElementById('p-confirm-cancel').addEventListener('click', closeConfirm);
+document.getElementById('p-confirm').addEventListener('click', e => {
+  if (e.target === document.getElementById('p-confirm')) closeConfirm();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && _pendingDelete) closeConfirm();
+});
+document.getElementById('p-confirm-delete').addEventListener('click', () => {
+  const alias = _pendingDelete;
+  closeConfirm();
+  if (alias) deleteAlias(alias).catch(err => showError('Delete failed: ' + err.message));
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -1115,7 +1085,6 @@ async function init() {
       } catch (e) { /* provider hiccup shouldn't break the whole popup */ }
     }
 
-    renderSuggestions();
     fillFromTab();
     fetchAll();
   } catch (e) {

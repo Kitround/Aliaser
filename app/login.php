@@ -12,6 +12,11 @@
 require_once __DIR__ . '/auth.php';
 aliaser_session_start();
 
+// The page embeds a per-session CSRF token and, on the enrolment step, the TOTP
+// secret — never let a proxy or the browser cache store it.
+header('Cache-Control: no-store, no-cache, must-revalidate');
+header('Pragma: no-cache');
+
 // Already authenticated → straight to the app.
 if (auth_session_valid()) { header('Location: ./'); exit; }
 
@@ -32,10 +37,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_GET['action'] ?? '', ['p
     header('Content-Type: application/json');
     if (!auth_methods()['passkey']) { http_response_code(400); echo json_encode(['error' => 'No passkey enrolled']); exit; }
     if (auth_is_locked()) { http_response_code(429); echo json_encode(['error' => 'Too many attempts']); exit; }
-    $in = json_decode(file_get_contents('php://input'), true) ?: [];
-    if (!hash_equals($_SESSION['form_csrf'] ?? '', $in['csrf'] ?? '')) { http_response_code(403); echo json_encode(['error' => 'CSRF']); exit; }
+    // Cap the body: this endpoint is reachable pre-authentication.
+    $in = json_decode(file_get_contents('php://input', false, null, 0, 65536), true);
+    if (!is_array($in)) $in = [];
+    $inCsrf = is_string($in['csrf'] ?? null) ? $in['csrf'] : '';
+    if (!hash_equals($_SESSION['form_csrf'] ?? '', $inCsrf)) { http_response_code(403); echo json_encode(['error' => 'CSRF']); exit; }
     if (($_GET['action']) === 'passkey-login-options') { echo json_encode(webauthn_assertion_options()); exit; }
-    $res = webauthn_assertion_verify($in['response'] ?? []);
+    $res = webauthn_assertion_verify(is_array($in['response'] ?? null) ? $in['response'] : []);
     if ($res === true) {
         auth_reset_fails();
         auth_establish_session(auth_username());

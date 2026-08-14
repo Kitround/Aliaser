@@ -1,11 +1,12 @@
-FROM php:8.2-apache
+FROM php:8.5-apache
 
-# Install curl extension (openssl is already a core PHP extension)
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libcurl4-openssl-dev \
-    && docker-php-ext-configure curl \
-    && docker-php-ext-install curl \
-    && rm -rf /var/lib/apt/lists/*
+# curl, openssl and argon2 are already compiled into the official image
+# (docker-library/php configures --with-curl, --with-openssl and
+# --with-password-argon2), so there is nothing to install. Assert it at build
+# time instead of assuming: without curl, proxy.php cannot reach any provider;
+# without argon2, auth_hash_password() silently downgrades to bcrypt.
+RUN php -r 'exit(extension_loaded("curl") && extension_loaded("openssl") && defined("PASSWORD_ARGON2ID") ? 0 : 1);' \
+ || { echo "FATAL: base image is missing curl, openssl or argon2 support"; exit 1; }
 
 RUN a2enmod rewrite headers
 

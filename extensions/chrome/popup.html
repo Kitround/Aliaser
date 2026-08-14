@@ -120,6 +120,19 @@
   <div class="setup-hint">Local only? Default: <code style="font-family:var(--mono)">http://localhost:8080</code></div>
 </div>
 
+<!-- Confirm delete -->
+<div class="p-confirm" id="p-confirm">
+  <div class="p-confirm-box">
+    <div class="p-confirm-title">Delete alias?</div>
+    <div class="p-confirm-sub">This permanently removes</div>
+    <div class="p-confirm-alias" id="p-confirm-alias"></div>
+    <div class="p-confirm-actions">
+      <button class="p-confirm-btn" id="p-confirm-cancel">Cancel</button>
+      <button class="p-confirm-btn danger" id="p-confirm-delete">Delete</button>
+    </div>
+  </div>
+</div>
+
 <script src="config.js"></script>
 <script src="popup.js"></script>
 </body>

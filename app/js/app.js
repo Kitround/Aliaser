@@ -176,7 +176,10 @@ async function proxyCall(provider,method,path,body=null,extra={},retries=2){
       return data;
     }catch(e){
       const isNetworkErr=e instanceof TypeError||e.message==='Failed to fetch'||e.message.includes('NetworkError');
-      if(isNetworkErr&&attempt<retries){
+      // Only retry reads. A network error means the request may well have
+      // reached the provider, so replaying a POST/PATCH would create a second
+      // alias (or a second contact) with no way to tell.
+      if(isNetworkErr&&attempt<retries&&method==='GET'){
         await new Promise(r=>setTimeout(r,500*(attempt+1)));
         continue;
       }
@@ -689,7 +692,9 @@ async function fetchAliases(){
       .then(list=>{
         delete state.accountErrors[acc.id];
         let next=state.aliases.filter(a=>a.accountId!==acc.id);
-        next=[...next,...list];
+        // Single choke point for all six providers: an entry without an address
+        // would blow up the sort and every render downstream.
+        next=[...next,...list.filter(a=>a&&a.aliasAddress)];
         if(!apiProviders.has(acc.provider)){
           const disabledForAcc=state.disabledAliases.filter(d=>
             d.accountId===acc.id && !list.some(l=>l.aliasAddress===d.aliasAddress)
@@ -697,7 +702,7 @@ async function fetchAliases(){
           next=[...next,...disabledForAcc.map(d=>({...d,disabled:true}))];
         }
         state.aliases=next.sort((a,b)=>a.aliasAddress.localeCompare(b.aliasAddress));
-        applyFilter();render();
+        applyFilter();scheduleRender();
       })
       .catch(e=>{
         const lbl=labelFor[acc.provider]||acc.provider;
@@ -862,7 +867,9 @@ function renderList(){
   let html='';
   let currentLetter='';
   state.filteredAliases.forEach(a=>{
-    const letter=a.aliasAddress[0].toUpperCase();
+    // A provider can hand back an alias with an empty address; indexing [0] on
+    // it would throw and blank the whole list.
+    const letter=(a.aliasAddress||'?')[0].toUpperCase();
     if(letter!==currentLetter){currentLetter=letter;html+=`<div class="alias-letter">${letter}</div>`;}
     const providerClass=
       a.provider==='infomaniak'?'ik':
@@ -888,8 +895,8 @@ function renderList(){
         <div class="alias-badges">
           <span class="pbadge pbadge-${providerClass}">${providerLabel}</span>
           ${a.disabled?'<span class="badge-disabled">disabled</span>':''}
-          ${a.provider==='simplelogin'&&!a.disabled?`<span class="sl-stat" title="Forwarded">↓${a.slNbForward||0}</span><span class="sl-stat" title="Replied">↑${a.slNbReply||0}</span>${(a.slNbBlock||0)>0?`<span class="sl-stat sl-stat-block" title="Blocked">✕${a.slNbBlock}</span>`:''}`:'' }
-          ${a.provider==='addy'&&!a.disabled?`<span class="addy-stat" title="Forwarded">↓${a.addyNbForward||0}</span><span class="addy-stat" title="Replied">↑${a.addyNbReply||0}</span><span class="addy-stat" title="Sent">→${a.addyNbSend||0}</span>${(a.addyNbBlock||0)>0?`<span class="addy-stat addy-stat-block" title="Blocked">✕${a.addyNbBlock}</span>`:''}`:''}
+          ${a.provider==='simplelogin'&&!a.disabled?`<span class="sl-stat" title="Forwarded">↓${Number(a.slNbForward)||0}</span><span class="sl-stat" title="Replied">↑${Number(a.slNbReply)||0}</span>${(a.slNbBlock||0)>0?`<span class="sl-stat sl-stat-block" title="Blocked">✕${Number(a.slNbBlock)||0}</span>`:''}`:'' }
+          ${a.provider==='addy'&&!a.disabled?`<span class="addy-stat" title="Forwarded">↓${Number(a.addyNbForward)||0}</span><span class="addy-stat" title="Replied">↑${Number(a.addyNbReply)||0}</span><span class="addy-stat" title="Sent">→${Number(a.addyNbSend)||0}</span>${(a.addyNbBlock||0)>0?`<span class="addy-stat addy-stat-block" title="Blocked">✕${Number(a.addyNbBlock)||0}</span>`:''}`:''}
         </div>
         ${state.notes[a.aliasAddress]?`<div class="alias-note">${esc(state.notes[a.aliasAddress])}</div>`:'<div class="alias-note-empty">no description</div>'}
       </div>
@@ -1041,7 +1048,8 @@ document.getElementById('account-list').addEventListener('click',e=>{
     renderAccountList();
     return;
   }
-
+  const editBtn=e.target.closest('.edit-account-btn');
+  if(editBtn){openEditAccount(editBtn.dataset.accountId);return;}
 });
 
 // ── Render new alias account selector ────────────────────────────────────────
@@ -1080,7 +1088,7 @@ function populateSlSuffixDropdown(acc){
   const prev=state.selectedSlSuffix;
   sel.innerHTML=sorted.map(function(s){
     const label=(s.is_custom||s.premium)?'★ '+s.suffix:s.suffix;
-    return'<option value="'+esc(s.signed_suffix||s['signed-suffix']||'')+'"'+((prev&&prev===s.suffix)||(!prev&&sorted[0]===s)?'':'')+'>'+esc(label)+'</option>';
+    return'<option value="'+esc(s.signed_suffix||s['signed-suffix']||'')+'">'+esc(label)+'</option>';
   }).join('');
   // Restore previously selected value if still available, else use first
   const signed=sorted.find(s=>s.suffix===prev)?.signed_suffix||sorted[0]?.signed_suffix||sorted[0]?.['signed-suffix']||'';
@@ -1094,6 +1102,15 @@ function populateSlSuffixDropdown(acc){
 
 // ── Main render ───────────────────────────────────────────────────────────────
 function setRefreshSpin(on){document.querySelectorAll('.refresh-icon').forEach(el=>el.classList.toggle('spin-anim',on))}
+// render() rebuilds the whole list's innerHTML. Coalesce the bursty callers —
+// one per keystroke while searching, one per provider during a refresh — into a
+// single repaint per frame.
+let _renderQueued=false;
+function scheduleRender(){
+  if(_renderQueued)return;
+  _renderQueued=true;
+  requestAnimationFrame(()=>{_renderQueued=false;render();});
+}
 function render(){
   const loading=state.isLoading,ready=canAddAlias();
   // Show the spinner whenever we're loading and have nothing to display yet —
@@ -1736,11 +1753,6 @@ document.getElementById('btn-save-edit-account').addEventListener('click',()=>{
   saveAccountCredentials();
   hideAddForms();
 });
-document.getElementById('account-list').addEventListener('click',e=>{
-  const btn=e.target.closest('.edit-account-btn');
-  if(btn)openEditAccount(btn.dataset.accountId);
-});
-
 // OVH auth
 document.getElementById('btn-authenticate').addEventListener('click',async()=>{
   const appKey=document.getElementById('s-ovh-app-key').value.trim();
@@ -1839,7 +1851,7 @@ const _mobSearchClear=document.getElementById('mob-search-clear');
 _mobSearchInput?.addEventListener('input',e=>{
   state.searchQuery=e.target.value;
   if(_mobSearchClear)_mobSearchClear.style.display=e.target.value?'':'none';
-  applyFilter();render();
+  applyFilter();scheduleRender();
   // Matches are rendered at the top of the list — make sure that is what the
   // user is looking at, whatever they had scrolled to before searching.
   const sc=document.querySelector('.content-scroll');
@@ -2100,7 +2112,7 @@ document.getElementById('modal-sl-contacts').addEventListener('click',e=>{
     if(!id)return;
     blockBtn.disabled=true;
     slToggleContact(id).then(blocked=>{
-      const item=document.querySelector(`.contact-item[data-contact-id="${id}"]`);
+      const item=document.querySelector(`.contact-item[data-contact-id="${CSS.escape(id)}"]`);
       if(item){
         item.classList.toggle('contact-blocked',blocked);
         blockBtn.classList.toggle('blocked-active',blocked);
@@ -2208,7 +2220,7 @@ document.getElementById('search-clear').addEventListener('click',()=>{
   inp.focus();
 });
 document.getElementById('search-input').addEventListener('input',e=>{
-  state.searchQuery=e.target.value;document.getElementById('search-clear').style.display=e.target.value?'':'none';applyFilter();render();
+  state.searchQuery=e.target.value;document.getElementById('search-clear').style.display=e.target.value?'':'none';applyFilter();scheduleRender();
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────

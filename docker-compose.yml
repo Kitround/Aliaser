@@ -7,4 +7,8 @@ services:
       - ./app/json:/var/www/html/json
     environment:
       ALIASER_SECRET_KEY: ${ALIASER_SECRET_KEY:-}
+      # Optional but strongly recommended when the app is reachable by
+      # anyone before first run: without it, whoever loads login.php
+      # first creates the admin account.
+      ALIASER_SETUP_TOKEN: ${ALIASER_SETUP_TOKEN:-}
     restart: unless-stopped

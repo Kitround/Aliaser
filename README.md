@@ -2,7 +2,7 @@
 
 A single-page web app for managing email aliases across multiple providers, without touching their admin interfaces.
 
-![PHP](https://img.shields.io/badge/PHP-8.2-777bb4?logo=php&logoColor=white)
+![PHP](https://img.shields.io/badge/PHP-8.5-777bb4?logo=php&logoColor=white)
 ![Vanilla JS](https://img.shields.io/badge/JS-Vanilla-f7df1e?logo=javascript&logoColor=black)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ed?logo=docker&logoColor=white)
 
@@ -82,7 +82,7 @@ Server-side data lives under `app/json/` (mounted as a volume, not committed). S
 
 ### Manual (nginx / Apache + PHP 8.2+)
 
-Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
+Requirements: PHP 8.2+, `openssl` and `curl` extensions. The Docker image tracks **8.5** (8.2 goes end-of-life 31 Dec 2026; 8.4 leaves active support the same day).
 
 1. Copy the `app/` folder contents to your web root.
 
@@ -91,9 +91,34 @@ Requirements: PHP 8.2+, `openssl` extension, `curl` extension.
    mkdir -p json && chown www-data:www-data json
    ```
 
-3. Set `ALIASER_SECRET_KEY` (64 hex chars) as an environment variable in your PHP-FPM or Apache config, and ensure `json/` is not reachable over HTTP.
+3. **Block HTTP access to `json/`.** This is not optional: the directory holds
+   your encrypted credentials, session files and the encryption key. The bundled
+   `json/.htaccess` only works if `AllowOverride` is enabled — most setups ship
+   `AllowOverride None`, in which case it is silently ignored. Add the rule to
+   your server config instead:
 
-4. Open the app — complete the first-run admin + TOTP setup, then add your accounts from Settings.
+   ```apache
+   <Directory /var/www/html/json>
+       Require all denied
+       Options -Indexes
+   </Directory>
+   ```
+
+   ```nginx
+   location ^~ /json/ { deny all; return 404; }
+   ```
+
+   Then verify it, don't assume — this must return 403 or 404:
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' https://YOUR_HOST/json/credentials.json
+   ```
+
+   The Docker image does this for you (`docker/Dockerfile`). The PHP built-in
+   server (`php -S`) cannot do it at all — never use it to serve this app.
+
+4. Set `ALIASER_SECRET_KEY` (64 hex chars) as an environment variable in your PHP-FPM or Apache config.
+
+5. Open the app — complete the first-run admin + TOTP setup, then add your accounts from Settings.
 
 ## Browser extensions
 

@@ -97,11 +97,15 @@ async function loadPopupState() {
   const getJson = async (url) => {
     const r = await fetch(url, { headers: authHeaders() });
     if (r.status === 401) throw new Error('Not authorized — set a device token in Options.');
+    // Without this a 5xx body parses as JSON and the popup reports
+    // "No accounts configured" instead of surfacing the server error.
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.json();
   };
   const [sd, nd] = await Promise.all([
     getJson(base + '/proxy.php?action=state'),
-    getJson(base + '/proxy.php?action=notes'),
+    // Notes are decoration; a failure there must not blank the whole popup.
+    getJson(base + '/proxy.php?action=notes').catch(() => ({})),
   ]);
 
   ps.accounts          = sd.accounts || [];
@@ -526,6 +530,8 @@ async function fetchAll() {
       case 'simplelogin': return slFetchForAccount(acc);
       case 'addy':        return addyFetchForAccount(acc);
       case 'cloudflare':  return cfFetchForAccount(acc);
+      // Haltman is dashboard-only: it yields no aliases here and shows no error.
+      // Deliberate — do not turn this into a user-facing message.
       default:            return Promise.resolve([]);
     }
   };
@@ -578,7 +584,7 @@ async function deleteAlias(alias) {
     case 'addy':        await addyDeleteAlias(alias);      break;
     case 'cloudflare':  await cfDeleteAlias(alias, acc);   break;
   }
-  ps.aliases = ps.aliases.filter(a => a.id !== alias.id);
+  ps.aliases = ps.aliases.filter(a => !(a.id === alias.id && a.accountId === alias.accountId));
   delete ps.notes[alias.aliasAddress];
   applyFilter();
   renderList();
@@ -790,7 +796,7 @@ function renderList() {
         </svg>
       </button>` : '';
 
-    return `<div class="p-item${disabled ? ' is-disabled' : ''}" data-id="${esc(a.id)}">
+    return `<div class="p-item${disabled ? ' is-disabled' : ''}" data-id="${esc(a.id)}" data-account="${esc(a.accountId)}">
       <div class="p-item-addr">
         <div class="p-item-local">${esc(local)}<span class="p-item-domain">${esc(domain)}</span></div>
         ${note ? `<div class="p-item-note">${esc(note)}</div>` : ''}
@@ -992,29 +998,53 @@ document.getElementById('p-search').addEventListener('input', e => {
 });
 
 document.getElementById('p-list').addEventListener('click', e => {
-  const id = e.target.closest('[data-id]')?.dataset.id;
-  if (!id) return;
+  // Match on id AND accountId: Infomaniak alias ids are just the local part, so
+  // the same name on two IK accounts would otherwise resolve to the wrong row.
+  const item = e.target.closest('.p-item');
+  if (!item) return;
+  const alias = ps.aliases.find(a => a.id === item.dataset.id && a.accountId === item.dataset.account);
+  if (!alias) return;
 
   if (e.target.closest('.copy-btn')) {
-    const alias = ps.aliases.find(a => a.id === id);
-    if (alias) { navigator.clipboard?.writeText(alias.aliasAddress).catch(() => {}); showToast('Copied'); }
+    navigator.clipboard?.writeText(alias.aliasAddress).catch(() => {}); showToast('Copied');
     return;
   }
-  if (e.target.closest('.contacts-btn')) {
-    const alias = ps.aliases.find(a => a.id === id);
-    if (alias) openContacts(alias);
-    return;
-  }
+  if (e.target.closest('.contacts-btn')) { openContacts(alias); return; }
   if (e.target.closest('.toggle-btn')) {
-    const alias = ps.aliases.find(a => a.id === id);
-    if (alias) toggleAlias(alias).catch(err => showError('Toggle failed: ' + err.message));
+    toggleAlias(alias).catch(err => showError('Toggle failed: ' + err.message));
     return;
   }
   if (e.target.closest('.delete-btn')) {
-    const alias = ps.aliases.find(a => a.id === id);
-    if (alias) deleteAlias(alias).catch(err => showError('Delete failed: ' + err.message));
+    askDelete(alias);
     return;
   }
+});
+
+// ── Delete confirmation ───────────────────────────────────────────────────────
+// Deleting an alias is irreversible and there is no undo, so the popup asks
+// first — the same guard the dashboard has. textContent, never innerHTML: the
+// address comes from the provider.
+let _pendingDelete = null;
+function askDelete(alias) {
+  _pendingDelete = alias;
+  document.getElementById('p-confirm-alias').textContent = alias.aliasAddress;
+  document.getElementById('p-confirm').classList.add('open');
+}
+function closeConfirm() {
+  _pendingDelete = null;
+  document.getElementById('p-confirm').classList.remove('open');
+}
+document.getElementById('p-confirm-cancel').addEventListener('click', closeConfirm);
+document.getElementById('p-confirm').addEventListener('click', e => {
+  if (e.target === document.getElementById('p-confirm')) closeConfirm();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && _pendingDelete) closeConfirm();
+});
+document.getElementById('p-confirm-delete').addEventListener('click', () => {
+  const alias = _pendingDelete;
+  closeConfirm();
+  if (alias) deleteAlias(alias).catch(err => showError('Delete failed: ' + err.message));
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────

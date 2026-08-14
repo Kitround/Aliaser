@@ -100,6 +100,20 @@ function decryptData($str) {
     return ($dec !== false) ? json_decode($dec, true) : null;
 }
 
+// ── Concurrency ───────────────────────────────────────────────────────────────
+// Serialise a read-modify-write on one of the JSON stores. Without it, two
+// concurrent requests both read the old value and both write their own version:
+//   - throttle store → each parallel login reads fails=N and writes N+1, so the
+//     counter never reaches AUTH_MAX_FAILS (parallel brute-force bypass);
+//   - auth store     → two 2FA verifications race on totpLastStep / backupCodes,
+//     defeating the replay guard and letting one backup code be used twice.
+function auth_with_lock($path, callable $fn) {
+    $fh = @fopen($path . '.lock', 'c');
+    if ($fh) flock($fh, LOCK_EX);
+    try { return $fn(); }
+    finally { if ($fh) { flock($fh, LOCK_UN); fclose($fh); } }
+}
+
 // ── Auth store (json/auth.json, encrypted) ────────────────────────────────────
 function auth_read() {
     if (!file_exists(AUTH_FILE)) return ['user' => null, 'deviceTokens' => []];
@@ -214,6 +228,7 @@ function auth_hash_backup_code($code) {
     return hash('sha256', strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $code)));
 }
 // Consumes a matching backup code (single use). Returns true if consumed.
+// Caller must already hold the AUTH_FILE lock (see auth_verify_second_factor).
 function auth_consume_backup_code($code) {
     $a = auth_read();
     $h = auth_hash_backup_code($code);
@@ -227,21 +242,25 @@ function auth_consume_backup_code($code) {
 }
 
 // ── Second factor (centralised — passkey can be added here later) ─────────────
+// The whole read-check-write runs under one lock: both the TOTP step guard and
+// the backup-code consumption are only single-use if nothing interleaves.
 function auth_verify_second_factor($code) {
-    $a = auth_read();
-    $secret = $a['user']['totpSecret'] ?? '';
-    if ($secret !== '') {
-        $step = auth_totp_match_step($secret, $code);
-        if ($step !== null) {
-            // Replay defence: each code's time-step is single-use.
-            if ($step <= ($a['user']['totpLastStep'] ?? 0)) return false;
-            $a['user']['totpLastStep'] = $step;
-            auth_write($a);
-            return true;
+    return auth_with_lock(AUTH_FILE, function () use ($code) {
+        $a = auth_read();
+        $secret = $a['user']['totpSecret'] ?? '';
+        if ($secret !== '') {
+            $step = auth_totp_match_step($secret, $code);
+            if ($step !== null) {
+                // Replay defence: each code's time-step is single-use.
+                if ($step <= ($a['user']['totpLastStep'] ?? 0)) return false;
+                $a['user']['totpLastStep'] = $step;
+                auth_write($a);
+                return true;
+            }
         }
-    }
-    // Fall back to a one-time backup code.
-    return auth_consume_backup_code($code);
+        // Fall back to a one-time backup code.
+        return auth_consume_backup_code($code);
+    });
 }
 
 // ── Device tokens (extensions) ────────────────────────────────────────────────
@@ -302,27 +321,43 @@ function webauthn_origin() {
 
 // Minimal CBOR decoder — enough for attestationObject and COSE keys.
 // Returns [value, nextOffset].
-function cbor_decode($d, $off = 0) {
+// Every read is bounds-checked and every declared length is validated against
+// the remaining input. Attacker-supplied CBOR would otherwise (a) read past the
+// end of the string on a truncated payload and (b) declare an array/map of 2^32
+// items, spinning the loop until max_execution_time — a cheap CPU DoS.
+function cbor_decode($d, $off = 0, $depth = 0) {
+    $len = strlen($d);
+    if ($depth > 16)                 throw new Exception('CBOR too deep');
+    if ($off < 0 || $off >= $len)    throw new Exception('CBOR eof');
     $ib = ord($d[$off]); $off++;
     $major = $ib >> 5; $ai = $ib & 0x1f;
-    $readLen = function($ai) use ($d, &$off) {
+    $need = function($n) use ($len, &$off) {
+        if ($n < 0 || $n > $len - $off) throw new Exception('CBOR eof');
+    };
+    $readLen = function($ai) use ($d, $len, &$off, $need) {
         if ($ai < 24) return $ai;
-        if ($ai === 24) { $v = ord($d[$off]); $off += 1; return $v; }
-        if ($ai === 25) { $v = unpack('n', substr($d, $off, 2))[1]; $off += 2; return $v; }
-        if ($ai === 26) { $v = unpack('N', substr($d, $off, 4))[1]; $off += 4; return $v; }
-        if ($ai === 27) { $v = unpack('J', substr($d, $off, 8))[1]; $off += 8; return $v; }
+        if ($ai === 24) { $need(1); $v = ord($d[$off]);                    $off += 1; return $v; }
+        if ($ai === 25) { $need(2); $v = unpack('n', substr($d, $off, 2))[1]; $off += 2; return $v; }
+        if ($ai === 26) { $need(4); $v = unpack('N', substr($d, $off, 4))[1]; $off += 4; return $v; }
+        if ($ai === 27) { $need(8); $v = unpack('J', substr($d, $off, 8))[1]; $off += 8; return $v; }
         throw new Exception('CBOR len');
     };
     switch ($major) {
         case 0: return [$readLen($ai), $off];                       // uint
         case 1: return [-1 - $readLen($ai), $off];                  // negative int
-        case 2: $n = $readLen($ai); $v = substr($d, $off, $n); $off += $n; return [$v, $off]; // bytes
-        case 3: $n = $readLen($ai); $v = substr($d, $off, $n); $off += $n; return [$v, $off]; // text
-        case 4: $n = $readLen($ai); $arr = [];                      // array
-                for ($i = 0; $i < $n; $i++) { [$val, $off] = cbor_decode($d, $off); $arr[] = $val; }
+        case 2: // bytes
+        case 3: $n = $readLen($ai); $need($n);                      // text
+                $v = substr($d, $off, $n); $off += $n; return [$v, $off];
+        case 4: $n = $readLen($ai); $need($n); $arr = [];           // array (1 byte min/item)
+                for ($i = 0; $i < $n; $i++) { [$val, $off] = cbor_decode($d, $off, $depth + 1); $arr[] = $val; }
                 return [$arr, $off];
-        case 5: $n = $readLen($ai); $map = [];                      // map
-                for ($i = 0; $i < $n; $i++) { [$k, $off] = cbor_decode($d, $off); [$val, $off] = cbor_decode($d, $off); $map[$k] = $val; }
+        case 5: $n = $readLen($ai); $need($n * 2); $map = [];       // map (2 bytes min/pair)
+                for ($i = 0; $i < $n; $i++) {
+                    [$k, $off]   = cbor_decode($d, $off, $depth + 1);
+                    [$val, $off] = cbor_decode($d, $off, $depth + 1);
+                    if (!is_int($k) && !is_string($k)) throw new Exception('CBOR key');
+                    $map[$k] = $val;
+                }
                 return [$map, $off];
         case 7: if ($ai === 20) return [false, $off]; if ($ai === 21) return [true, $off]; if ($ai === 22) return [null, $off]; return [null, $off];
     }
@@ -380,7 +415,9 @@ function webauthn_register_options() {
         'timeout'                => 60000,
         'attestation'            => 'none',
         'excludeCredentials'     => $exclude,
-        'authenticatorSelection' => ['userVerification' => 'preferred', 'residentKey' => 'preferred'],
+        // 'required', matching webauthn_assertion_options(): sign-in is
+        // passwordless, so a credential without UV would be unusable.
+        'authenticatorSelection' => ['userVerification' => 'required', 'residentKey' => 'preferred'],
     ];
 }
 
@@ -393,21 +430,31 @@ function webauthn_register_verify($resp, $label) {
     if (!hash_equals($_SESSION['webauthn_chal'] ?? '', $cd['challenge'] ?? '')) return 'Challenge mismatch';
     if (($cd['origin'] ?? '') !== webauthn_origin()) return 'Origin mismatch';
 
+    // One guard for the whole parse: cbor_decode throws on malformed input, and
+    // every offset below depends on lengths the authenticator supplied.
     $att = b64url_decode($resp['response']['attestationObject'] ?? '');
-    try { [$attObj] = cbor_decode($att, 0); } catch (Exception $e) { return 'Bad attestation'; }
-    $authData = $attObj['authData'] ?? '';
-    if (strlen($authData) < 37) return 'Bad authData';
-    $rpIdHash = substr($authData, 0, 32);
-    if (!hash_equals(hash('sha256', webauthn_rp_id(), true), $rpIdHash)) return 'rpId mismatch';
-    $flags = ord($authData[32]);
-    if (!($flags & 0x01)) return 'User not present';
-    if (!($flags & 0x40)) return 'No attested credential';
-    $credIdLen = unpack('n', substr($authData, 53, 2))[1];
-    $credId = substr($authData, 55, $credIdLen);
-    [$cose] = cbor_decode($authData, 55 + $credIdLen);
-    $pem = cose_ec2_to_pem($cose);
-    if (!$pem) return 'Unsupported key (need ES256/P-256)';
-    $signCount = unpack('N', substr($authData, 33, 4))[1];
+    try {
+        [$attObj] = cbor_decode($att, 0);
+        $authData = (is_array($attObj) && isset($attObj['authData'])) ? $attObj['authData'] : '';
+        if (!is_string($authData) || strlen($authData) < 55) return 'Bad authData';
+        $rpIdHash = substr($authData, 0, 32);
+        if (!hash_equals(hash('sha256', webauthn_rp_id(), true), $rpIdHash)) return 'rpId mismatch';
+        $flags = ord($authData[32]);
+        if (!($flags & 0x01)) return 'User not present';
+        // Assertion requires UV, so refuse to enrol a credential that cannot
+        // provide it — it would be a passkey that can never sign in.
+        if (!($flags & 0x04)) return 'User verification required';
+        if (!($flags & 0x40)) return 'No attested credential';
+        $credIdLen = unpack('n', substr($authData, 53, 2))[1];
+        if ($credIdLen < 1 || $credIdLen > 1023 || 55 + $credIdLen > strlen($authData)) return 'Bad credential id';
+        $credId = substr($authData, 55, $credIdLen);
+        [$cose] = cbor_decode($authData, 55 + $credIdLen);
+        $pem = cose_ec2_to_pem($cose);
+        if (!$pem) return 'Unsupported key (need ES256/P-256)';
+        $signCount = unpack('N', substr($authData, 33, 4))[1];
+    } catch (\Throwable $e) {
+        return 'Bad attestation';
+    }
 
     $a = auth_read();
     if (empty($a['user'])) return 'No user';
@@ -442,8 +489,14 @@ function webauthn_assertion_options() {
 }
 
 // Assertion verify. Returns true on success.
+// Runs under the auth-store lock: the sign-count check is a read-compare-write,
+// and two concurrent assertions replaying the same counter would both pass it.
 function webauthn_assertion_verify($resp) {
-    $credId = $resp['id'] ?? '';
+    return auth_with_lock(AUTH_FILE, fn() => webauthn_assertion_verify_locked($resp));
+}
+function webauthn_assertion_verify_locked($resp) {
+    $credId = is_string($resp['id'] ?? null) ? $resp['id'] : '';
+    if ($credId === '') return 'Unknown credential';
     $pk = auth_get_passkey($credId);
     if (!$pk) return 'Unknown credential';
 
@@ -505,18 +558,28 @@ function auth_lock_remaining() {
 }
 function auth_is_locked() { return auth_lock_remaining() > 0; }
 function auth_record_fail() {
-    $t = auth_throttle_read();
-    $k = auth_throttle_key();
-    $e = $t[$k] ?? ['fails' => 0, 'until' => 0];
-    $e['fails'] = ($e['fails'] ?? 0) + 1;
-    if ($e['fails'] >= AUTH_MAX_FAILS) { $e['until'] = time() + AUTH_LOCK_SECONDS; $e['fails'] = 0; }
-    $t[$k] = $e;
-    auth_throttle_write($t);
+    auth_with_lock(THROTTLE_FILE, function () {
+        $t = auth_throttle_read();
+        $k = auth_throttle_key();
+        $e = $t[$k] ?? ['fails' => 0, 'until' => 0];
+        $e['fails'] = ($e['fails'] ?? 0) + 1;
+        if ($e['fails'] >= AUTH_MAX_FAILS) { $e['until'] = time() + AUTH_LOCK_SECONDS; $e['fails'] = 0; }
+        // Drop entries whose lockout expired long ago so the file cannot grow
+        // without bound as an attacker rotates source addresses.
+        $cutoff = time() - AUTH_LOCK_SECONDS * 12;
+        foreach ($t as $ip => $entry) {
+            if ($ip !== $k && ($entry['until'] ?? 0) < $cutoff) unset($t[$ip]);
+        }
+        $t[$k] = $e;
+        auth_throttle_write($t);
+    });
 }
 function auth_reset_fails() {
-    $t = auth_throttle_read();
-    unset($t[auth_throttle_key()]);
-    auth_throttle_write($t);
+    auth_with_lock(THROTTLE_FILE, function () {
+        $t = auth_throttle_read();
+        unset($t[auth_throttle_key()]);
+        auth_throttle_write($t);
+    });
 }
 
 // ── Audit log ─────────────────────────────────────────────────────────────────

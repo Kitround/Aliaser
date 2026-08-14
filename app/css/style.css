@@ -26,7 +26,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .brand{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .brand-icon{width:28px;height:22px;margin-top:5px}
 .brand-name{font-family:var(--mono);font-size:.9rem;font-weight:500;white-space:nowrap}
-.brand-sep{width:1px;height:16px;background:var(--border2)}
 .topbar-right{display:flex;align-items:center;gap:6px;flex-shrink:0}
 
 .topbar-count{font-size:.66rem;font-family:var(--mono);color:var(--text-dim);flex-shrink:0;opacity:0;transition:opacity .2s}
@@ -132,11 +131,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 /* ── Settings form ── */
 .settings-section{display:flex;flex-direction:column;gap:9px}
 .field{display:flex;flex-direction:column;gap:4px}
-.field-label,.section-label{font-size:.7rem;font-family:var(--mono);color:var(--text-dim);text-transform:uppercase;letter-spacing:.07em}
+.section-label{font-size:.7rem;font-family:var(--mono);color:var(--text-dim);text-transform:uppercase;letter-spacing:.07em}
 .section-label{padding-top:10px;padding-bottom:6px}
 .section-label-provider{margin-top:8px}
-.cred-label-row{display:flex;align-items:center;justify-content:space-between}
-.cred-status{display:flex;align-items:center}
 .field-input{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;font-family:var(--mono);font-size:.76rem;color:var(--text);width:100%;outline:none;transition:border-color var(--t)}
 .field-input:focus{border-color:var(--accent)}
 .field-input::placeholder{color:var(--text-dim);opacity:.5}
@@ -150,7 +147,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .field-preview{font-family:var(--mono);font-size:.8rem;font-weight:500;color:#fff;background:var(--accent);border:1px solid var(--accent);border-radius:20px;padding:5px 12px;display:flex;align-items:center;gap:6px;transition:all var(--t);min-height:0;cursor:default;overflow:hidden;white-space:nowrap}
 .field-preview span{display:block;overflow:hidden;white-space:nowrap}
 .field-preview.preview-overflow span{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent 100%);mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent 100%)}
-.field-preview:not(.alias-preview-placeholder){}
 .alias-preview-placeholder{color:var(--text-dim);background:var(--surface2);border-color:var(--border)}
 /* ── Account list in settings ── */
 .account-list{display:flex !important;flex-direction:column !important;gap:6px}
@@ -175,8 +171,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .auth-url-box.visible{display:block}
 .auth-message{font-size:.8rem;color:var(--text-muted);line-height:1.5;display:none;background:var(--green-soft);border:1px solid rgba(0,152,255,.15);border-radius:var(--r);padding:8px 10px}
 .auth-message.visible{display:block}
-.status-row{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)}
-.status-label{font-size:.82rem;color:var(--text-muted)}
 .status-badge{display:flex;align-items:center;gap:5px;font-size:.76rem;font-family:var(--mono)}
 .status-dot{width:6px;height:6px;border-radius:50%;background:var(--text-dim)}
 .status-dot.green{background:#22c55e}
@@ -228,7 +222,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .topbar-count{margin-left:auto}
   .search-wrap{display:none}
   .bar-btn.active{color:var(--accent)}
-  .brand-sep{display:none}
   .topbar-right{display:none}
   .mobile-bar{display:flex}
   /* Fade the cards out under the search bar instead of cutting them flat. */
@@ -283,7 +276,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 #edit-acc-status-text,#auth-status-text{font-size:.76rem;color:var(--text-muted)}
 #edit-acc-dashboard-link{margin-left:auto}
 #btn-create-contact{width:100%;margin-top:6px}
-.code-accent{font-family:var(--mono);color:var(--accent)}
 .link-accent{color:var(--accent);text-decoration:none}
 /* Optional label */
 .label-optional{opacity:.4;font-size:.65rem;text-transform:none;letter-spacing:0}
@@ -301,7 +293,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 /* ── Contacts modal ── */
 .contacts-alias-label{color:var(--sl);background:var(--sl-soft);border-color:rgba(192,38,160,.2);cursor:default;pointer-events:none}
 .contacts-alias-label-addy{color:var(--addy);background:var(--addy-soft);border-color:rgba(14,165,233,.2)}
-.contacts-list-wrap{display:flex;flex-direction:column;gap:5px}
 #contacts-list{display:flex;flex-direction:column;gap:5px}
 .contact-item{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:9px 10px;display:flex;align-items:center;gap:8px;transition:border-color var(--t)}
 .contact-actions{display:flex;align-items:center;gap:2px;flex-shrink:0}
@@ -316,20 +307,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .contact-blocked .contact-reverse{opacity:.35}
 .contacts-loading{display:flex;justify-content:center;padding:20px 0}
 .contacts-empty{font-size:.78rem;color:var(--text-dim);text-align:center;padding:16px 0;font-style:italic}
-/* ── SL account info panel ── */
-.sl-info-header{display:flex;align-items:center;gap:8px}
-.sl-info-header .icon-btn{flex-shrink:0;width:28px;height:28px}
-.sl-info-loading{display:flex;justify-content:center;padding:16px 0}
-.sl-info-row{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);font-size:.78rem}
-.sl-info-label{color:var(--text-muted)}
-.sl-info-value{font-family:var(--mono);font-size:.74rem;color:var(--text)}
-.sl-info-section-title{font-size:.68rem;font-family:var(--mono);color:var(--text-dim);text-transform:uppercase;letter-spacing:.07em;margin-top:4px}
-#sl-info-body{display:flex;flex-direction:column;gap:5px}
-.sl-mailbox-item{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:7px 10px;display:flex;align-items:center;gap:6px}
-.sl-mailbox-email{font-family:var(--mono);font-size:.76rem;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sl-mailbox-badge{font-size:.58rem;font-family:var(--mono);padding:1px 5px;border-radius:3px;background:var(--sl-soft);color:var(--sl);flex-shrink:0}
-.sl-mailbox-unverified{background:rgba(224,144,64,.12);color:var(--orange)}
-
 /* ── All hover effects — desktop/mouse only ── */
 @media(hover:hover){
   .search-clear:hover{color:var(--text)}

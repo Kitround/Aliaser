@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <title>Aliaser</title>
-<link rel="stylesheet" href="css/style.css" blocking="render">
 <style>
-/* Critical CSS variables duplicated here to prevent FOUC before style.css loads */
+/* Self-contained: the popup ships no external stylesheet, so nothing blocks
+   the first paint and there is no FOUC window to cover. */
 :root{
   --bg:#0f0f0f;--bg2:#0f0f0f;--surface:#171717;--surface2:#1e1e1e;--surface3:#242424;
   --border:#2a2a2a;--border2:#333;--text:#e0e0e0;--text-muted:#808080;--text-dim:#515151;
@@ -122,12 +122,6 @@ html,body{width:420px;height:580px;overflow:hidden;display:flex;flex-direction:c
 .copy-toast-global:not(.anchored){top:14px}
 
 /* Suggestions */
-.p-suggestion-wrap{padding:4px 12px 8px;border-top:1px solid var(--border)}
-.p-suggestion-label{font-size:.6rem;font-weight:600;letter-spacing:.08em;color:var(--text-dim);text-transform:uppercase;font-family:var(--mono);margin-bottom:4px}
-.p-suggestion-row{display:flex;align-items:center;justify-content:space-between;padding:5px 6px;border-radius:5px;cursor:pointer;gap:6px;transition:background .12s}
-.p-suggestion-row:hover{background:var(--surface3)}
-.p-suggestion-full{font-size:.78rem;color:var(--text);font-family:var(--mono);white-space:nowrap;overflow:hidden;mask-image:linear-gradient(to right,#000 80%,transparent 100%);flex:1;min-width:0}
-.suggestion-premium{font-size:.55rem;font-weight:600;color:var(--sl);border:1px solid var(--sl);border-radius:3px;padding:1px 4px;flex-shrink:0;white-space:nowrap;font-family:var(--mono)}
 
 /* Setup overlay */
 .setup-overlay{display:none;position:fixed;inset:0;background:var(--bg);z-index:999;flex-direction:column;justify-content:center;padding:28px 22px;gap:14px}
@@ -136,6 +130,35 @@ html,body{width:420px;height:580px;overflow:hidden;display:flex;flex-direction:c
 .setup-sub{font-size:.76rem;color:var(--text-muted);line-height:1.5}
 .setup-lbl{font-size:.6rem;font-family:var(--mono);color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
 .setup-hint{font-size:.67rem;color:var(--text-dim);text-align:center}
+/* ── Shared chrome/header/toast/banner rules (popup is fully self-contained) ── */
+body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex;min-height:100dvh;overflow:hidden}
+.brand{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.brand-icon{width:28px;height:22px;margin-top:5px}
+.brand-name{font-family:var(--mono);font-size:.9rem;font-weight:500;white-space:nowrap}
+.topbar-count{font-size:.66rem;font-family:var(--mono);color:var(--text-dim);flex-shrink:0;opacity:0;transition:opacity .2s;margin-left:auto}
+.topbar-count.visible{opacity:1}
+#contacts-list{display:flex;flex-direction:column;gap:5px}
+.contact-item:hover{border-color:var(--border2)}
+.copy-toast-global{position:fixed;background:#fff;color:#111;font-size:.78rem;font-family:var(--mono);font-weight:500;padding:6px 14px;border-radius:50px;pointer-events:none;opacity:0;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;display:flex;align-items:center;gap:7px;max-width:calc(100vw - 32px)}
+#copy-toast-text{overflow:hidden;text-overflow:ellipsis}
+.copy-toast-global.show{opacity:1}
+.copy-toast-global:not(.anchored){left:50%;top:24px;transform:translateX(-50%);transition:opacity .15s,transform .15s}
+.copy-toast-global.anchored{transform:translateX(-50%) translateY(-100%);transition:opacity .15s}
+.error-banner{position:fixed;top:54px;left:50%;transform:translateX(-50%);z-index:500;display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid rgba(224,80,80,.25);border-radius:20px;padding:8px 16px;font-size:.82rem;color:#e08080;box-shadow:0 4px 16px rgba(0,0,0,.4);max-width:calc(100vw - 40px);opacity:0;pointer-events:none;transition:opacity var(--t)}
+.error-banner.visible{opacity:1;pointer-events:auto}
+#error-text{word-break:break-word}
+/* ── Confirm delete ── */
+.p-confirm{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center;padding:22px}
+.p-confirm.open{display:flex}
+.p-confirm-box{background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:18px;width:100%;display:flex;flex-direction:column;gap:8px}
+.p-confirm-title{font-size:.9rem;font-weight:500;color:var(--text)}
+.p-confirm-sub{font-size:.76rem;color:var(--text-muted);line-height:1.4}
+.p-confirm-alias{font-family:var(--mono);font-size:.78rem;color:var(--accent);word-break:break-all}
+.p-confirm-actions{display:flex;gap:7px;margin-top:6px}
+.p-confirm-btn{flex:1;height:34px;border-radius:8px;font-size:.78rem;font-weight:500;cursor:pointer;font-family:inherit;border:1px solid var(--border2);background:var(--surface2);color:var(--text);transition:background .15s,border-color .15s}
+.p-confirm-btn:hover{background:var(--surface3)}
+.p-confirm-btn.danger{background:transparent;border-color:rgba(224,80,80,.3);color:var(--red)}
+.p-confirm-btn.danger:hover{background:var(--red-soft)}
 </style>
 </head>
 <body>
@@ -195,12 +218,6 @@ html,body{width:420px;height:580px;overflow:hidden;display:flex;flex-direction:c
     </button>
   </div>
 
-  <!-- Random alias suggestions -->
-  <div class="p-suggestion-wrap" id="p-suggestion-wrap" style="display:none">
-    <div class="p-suggestion-label">Random alias</div>
-    <div id="p-suggestions"></div>
-  </div>
-
   <!-- Search -->
   <div class="p-search-wrap">
     <svg class="p-search-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -257,6 +274,19 @@ html,body{width:420px;height:580px;overflow:hidden;display:flex;flex-direction:c
   </div>
   <button class="p-create-btn" id="setup-save">Connect</button>
   <div class="setup-hint">Local only? Default: <code style="font-family:var(--mono)">http://localhost:8080</code></div>
+</div>
+
+<!-- Confirm delete -->
+<div class="p-confirm" id="p-confirm">
+  <div class="p-confirm-box">
+    <div class="p-confirm-title">Delete alias?</div>
+    <div class="p-confirm-sub">This permanently removes</div>
+    <div class="p-confirm-alias" id="p-confirm-alias"></div>
+    <div class="p-confirm-actions">
+      <button class="p-confirm-btn" id="p-confirm-cancel">Cancel</button>
+      <button class="p-confirm-btn danger" id="p-confirm-delete">Delete</button>
+    </div>
+  </div>
 </div>
 
 <script src="config.js"></script>
