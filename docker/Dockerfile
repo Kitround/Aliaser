@@ -31,4 +31,12 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 80
+
+# Real health in Portainer. ?action=health checks that the mounted json/ volume
+# is writable — the failure that actually breaks the app after a redeploy, and
+# the one a plain "is the port open" probe would miss. Uses PHP because the
+# image ships the curl *extension*, not the curl binary.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD php -r '$r=@file_get_contents("http://127.0.0.1/proxy.php?action=health"); exit($r && str_contains($r,"\"ok\"") ? 0 : 1);'
+
 ENTRYPOINT ["/entrypoint.sh"]

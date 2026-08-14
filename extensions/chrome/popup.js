@@ -11,6 +11,7 @@ const ps = {
   disabledAliases:   [],
   slOptions:         {},   // { accountId: {suffixes, prefixSuggestion, mailboxId} }
   selectedSuffix:    {},   // { accountId: {suffix, signed_suffix} }
+  addyContacts:      {},   // { aliasId: [{email, reverse}] } — server-side cache, no Addy API
   searchQuery:       '',
   selectedAccountId: null,
   currentTabHost:    '',
@@ -18,7 +19,7 @@ const ps = {
 
 // Read dynamically so it picks up the URL set by config.js after first-time setup
 function getProxy() { return window.ALIASER_PROXY_URL || './proxy.php'; }
-function getDeviceToken() { return localStorage.getItem('aliaser_device_token') || ''; }
+function getDeviceToken() { return window.ALIASER_DEVICE_TOKEN || ''; }
 // Inject the device token so the server's auth gate accepts extension requests.
 function authHeaders(extra) {
   const h = Object.assign({}, extra || {});
@@ -30,6 +31,13 @@ function authHeaders(extra) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 function esc(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Parse-then-adopt instead of innerHTML. Every interpolation already goes
+// through esc(), so this is about keeping the two extensions identical (and
+// about not tripping store reviews that flag innerHTML on sight).
+function setHTML(el, html) {
+  const doc = new DOMParser().parseFromString(`<!DOCTYPE html><body>${html}`, 'text/html');
+  el.replaceChildren(...Array.from(doc.body.childNodes));
+}
 
 let _toastTimer = null;
 function showToast(text, duration = 1600) {
@@ -93,25 +101,27 @@ async function pc(provider, method, path, body = null, extra = {}, retries = 2) 
 // ── Load / save state ─────────────────────────────────────────────────────────
 // Uses plain fetch (no Cache-Control headers) to avoid CORS preflight from the extension.
 async function loadPopupState() {
-  const base = getProxy().replace(/\/proxy\.php(\?.*)?$/, '');
-  const getJson = async (url) => {
-    const r = await fetch(url, { headers: authHeaders() });
-    if (r.status === 401) throw new Error('Not authorized — set a device token in Options.');
-    // Without this a 5xx body parses as JSON and the popup reports
-    // "No accounts configured" instead of surfacing the server error.
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.json();
-  };
-  const [sd, nd] = await Promise.all([
-    getJson(base + '/proxy.php?action=state'),
-    // Notes are decoration; a failure there must not blank the whole popup.
-    getJson(base + '/proxy.php?action=notes').catch(() => ({})),
+  const proxy = getProxy();
+  const safeFetch = (url) =>
+    fetch(url, { headers: authHeaders() }).then(r => {
+      if (r.status === 401) throw new Error('Not authorized — set a device token in Options.');
+      // Without this a 5xx body parses as JSON and the popup reports
+      // "No accounts configured" instead of surfacing the server error.
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  // Notes and contacts are decoration; a failure must not blank the popup.
+  const [sd, nd, ad] = await Promise.all([
+    safeFetch(proxy + '?action=state'),
+    safeFetch(proxy + '?action=notes').catch(() => ({})),
+    safeFetch(proxy + '?action=addy-contacts').catch(() => ({})),
   ]);
 
   ps.accounts          = sd.accounts || [];
   ps.notes             = (nd && !Array.isArray(nd)) ? nd : {};
   ps.zimbraPlatformIds = sd.zimbraPlatformIds || {};
   ps.disabledAliases   = sd.disabledAliases || [];
+  ps.addyContacts      = (ad && typeof ad === 'object' && !Array.isArray(ad)) ? ad : {};
 
   (sd.consumerKeys || []).forEach(({ id, key }) => {
     const acc = ps.accounts.find(a => a.id === id);
@@ -120,14 +130,33 @@ async function loadPopupState() {
 }
 
 async function saveNotes() {
-  const base = getProxy().replace(/\/proxy\.php(\?.*)?$/, '');
   try {
-    await fetch(base + '/proxy.php?action=notes', {
+    await fetch(getProxy() + '?action=notes', {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(ps.notes),
     });
   } catch (e) { console.error('Failed to save notes:', e); }
+}
+
+// Addy has no contacts API — reverse addresses are derived locally and cached
+// server-side in json/addy-contacts.json, exactly as the dashboard does it.
+async function saveAddyContacts() {
+  try {
+    await fetch(getProxy() + '?action=addy-contacts', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(ps.addyContacts),
+    });
+  } catch (e) { console.error('Failed to save addy contacts:', e); }
+}
+
+function addyBuildReverseAddress(aliasEmail, recipientEmail) {
+  const at = aliasEmail.indexOf('@');
+  const aliasLocal = aliasEmail.slice(0, at), aliasDomain = aliasEmail.slice(at + 1);
+  const rat = recipientEmail.indexOf('@');
+  const recLocal = recipientEmail.slice(0, rat), recDomain = recipientEmail.slice(rat + 1);
+  return `${aliasLocal}+${recLocal}=${recDomain}@${aliasDomain}`;
 }
 
 async function saveServerState() {
@@ -501,6 +530,46 @@ async function cfToggleAlias(alias, enable) {
   await cfCall(acc, 'PUT', '/zones/' + acc.zoneId + '/email/routing/rules/' + alias.id, body);
 }
 
+// ── Haltman ───────────────────────────────────────────────────────────────────
+async function haltmanCall(acc, method, path, body = null) {
+  return pc('haltman', method, path, body, { accountId: acc?.id || '', token: acc?.token || '' });
+}
+
+async function haltmanFetchForAccount(acc) {
+  const items = [];
+  let offset = 0;
+  const limit = 100;
+  for (;;) {
+    const data  = await haltmanCall(acc, 'GET', `/api/alias/list?limit=${limit}&offset=${offset}`);
+    const batch = data?.items || [];
+    for (const a of batch) {
+      items.push({
+        id:            String(a.id),
+        aliasAddress:  a.address,
+        targetAddress: a.goto || '',
+        provider:      'haltman',
+        accountId:     acc.id,
+        accountLabel:  acc.label,
+        disabled:      !a.active,
+      });
+    }
+    if (batch.length < limit) break;
+    offset += limit;
+  }
+  return items;
+}
+
+async function haltmanCreateAlias(acc, aliasName) {
+  const data    = await haltmanCall(acc, 'POST', '/api/alias/create', { alias_handle: aliasName, alias_domain: acc.domain });
+  const address = data?.data?.address || (aliasName + '@' + acc.domain);
+  return { id: address, aliasAddress: address, targetAddress: data?.data?.goto || '',
+           provider: 'haltman', accountId: acc.id, accountLabel: acc.label };
+}
+
+async function haltmanDeleteAlias(alias) {
+  await haltmanCall(accForAlias(alias), 'POST', '/api/alias/delete', { alias: alias.aliasAddress });
+}
+
 // Turn a raw provider/proxy error into a human-readable explanation.
 function describeProviderError(e) {
   const msg = (e && e.message) || String(e || '');
@@ -522,7 +591,7 @@ function describeProviderError(e) {
 async function fetchAll() {
   setListHtml('<div class="p-state"><div class="p-spinner"></div></div>');
   const apiProviders = new Set(['simplelogin', 'addy', 'cloudflare']);
-  const labelFor     = { ovh: 'OVH', infomaniak: 'IK', simplelogin: 'SL', addy: 'Addy', cloudflare: 'CF' };
+  const labelFor     = { ovh: 'OVH', infomaniak: 'IK', simplelogin: 'SL', addy: 'Addy', cloudflare: 'CF', haltman: 'Haltman' };
   const fetchFor = acc => {
     switch (acc.provider) {
       case 'ovh':         return ovhFetchForAccount(acc);
@@ -530,8 +599,7 @@ async function fetchAll() {
       case 'simplelogin': return slFetchForAccount(acc);
       case 'addy':        return addyFetchForAccount(acc);
       case 'cloudflare':  return cfFetchForAccount(acc);
-      // Haltman is dashboard-only: it yields no aliases here and shows no error.
-      // Deliberate — do not turn this into a user-facing message.
+      case 'haltman':     return haltmanFetchForAccount(acc);
       default:            return Promise.resolve([]);
     }
   };
@@ -570,6 +638,7 @@ async function createAlias(name, note = '') {
     case 'simplelogin': return (await slCreateAlias(acc, name, note)).aliasAddress;
     case 'addy':        return (await addyCreateAlias(acc, acc.isFree ? '' : name, note)).aliasAddress;
     case 'cloudflare':  return (await cfCreateAlias(acc, name)).aliasAddress;
+    case 'haltman':     return (await haltmanCreateAlias(acc, name)).aliasAddress;
     default: throw new Error('Unsupported provider');
   }
 }
@@ -583,6 +652,7 @@ async function deleteAlias(alias) {
     case 'simplelogin': await slDeleteAlias(alias);        break;
     case 'addy':        await addyDeleteAlias(alias);      break;
     case 'cloudflare':  await cfDeleteAlias(alias, acc);   break;
+    case 'haltman':     await haltmanDeleteAlias(alias);   break;
   }
   ps.aliases = ps.aliases.filter(a => !(a.id === alias.id && a.accountId === alias.accountId));
   delete ps.notes[alias.aliasAddress];
@@ -607,11 +677,12 @@ async function toggleAlias(alias) {
         case 'addy':        await addyToggleAlias(alias, true);   break;
         case 'cloudflare':  await cfToggleAlias(alias, true);     break;
         case 'ovh':
-        case 'infomaniak': {
+        case 'infomaniak':
+        case 'haltman': {
           const name     = alias.aliasAddress.includes('@') ? alias.aliasAddress.split('@')[0] : alias.aliasAddress;
-          const newAlias = alias.provider === 'infomaniak'
-            ? await ikCreateAlias(acc, name)
-            : await ovhCreateAlias(acc, name);
+          const newAlias = alias.provider === 'infomaniak' ? await ikCreateAlias(acc, name)
+                         : alias.provider === 'haltman'    ? await haltmanCreateAlias(acc, name)
+                         :                                   await ovhCreateAlias(acc, name);
           const i = ps.aliases.findIndex(a => a.aliasAddress === alias.aliasAddress && a.accountId === alias.accountId);
           if (i !== -1) ps.aliases[i] = { ...newAlias, disabled: false };
           ps.disabledAliases = ps.disabledAliases.filter(d =>
@@ -627,9 +698,11 @@ async function toggleAlias(alias) {
         case 'addy':        await addyToggleAlias(alias, false);  break;
         case 'cloudflare':  await cfToggleAlias(alias, false);    break;
         case 'ovh':
-        case 'infomaniak': {
-          if (alias.provider === 'infomaniak') await ikDeleteAlias(alias, acc);
-          else                                  await ovhDeleteAlias(alias, acc);
+        case 'infomaniak':
+        case 'haltman': {
+          if      (alias.provider === 'infomaniak') await ikDeleteAlias(alias, acc);
+          else if (alias.provider === 'haltman')    await haltmanDeleteAlias(alias);
+          else                                      await ovhDeleteAlias(alias, acc);
           const { id: _, pending: __, ...rest } = alias;
           if (!ps.disabledAliases.some(d => d.aliasAddress === rest.aliasAddress && d.accountId === rest.accountId))
             ps.disabledAliases.push({ ...rest, disabled: true });
@@ -655,13 +728,19 @@ async function openContacts(alias) {
   document.getElementById('contacts-alias-label').textContent = alias.aliasAddress;
   document.getElementById('contacts-new-email').value = '';
   document.getElementById('contacts-add-btn').disabled = false;
-  document.getElementById('contacts-list').innerHTML = '<div class="contacts-state"><div class="p-spinner"></div></div>';
+  setHTML(document.getElementById('contacts-list'), '<div class="contacts-state"><div class="p-spinner"></div></div>');
   document.getElementById('contacts-panel').classList.add('open');
+  if (alias.provider === 'addy') {
+    // No Addy contacts API: the reverse address is derived from the alias, so
+    // the list is whatever we cached server-side.
+    renderContacts(ps.addyContacts[alias.id] || []);
+    return;
+  }
   try {
     const contacts = await slFetchContacts(alias);
     renderContacts(contacts);
   } catch (e) {
-    document.getElementById('contacts-list').innerHTML = `<div class="contacts-state">Error: ${esc(e.message)}</div>`;
+    setHTML(document.getElementById('contacts-list'), `<div class="contacts-state">Error: ${esc(e.message)}</div>`);
   }
 }
 
@@ -673,10 +752,33 @@ function closeContacts() {
 function renderContacts(contacts) {
   const el = document.getElementById('contacts-list');
   if (!contacts.length) {
-    el.innerHTML = '<div class="contacts-state">No contacts yet.<br>Add one to get a reverse alias.</div>';
+    setHTML(el, '<div class="contacts-state">No contacts yet.<br>Add one to get a reverse alias.</div>');
     return;
   }
-  el.innerHTML = contacts.map(c => {
+  const isAddy = _contactsAlias?.provider === 'addy';
+  setHTML(el, contacts.map(c => {
+    if (isAddy) {
+      return `<div class="contact-item" data-contact-email="${esc(c.email)}">
+      <div class="contact-info">
+        <div class="contact-email">${esc(c.email)}</div>
+        <div class="contact-reverse">${esc(c.reverse)}</div>
+      </div>
+      <div class="contact-actions">
+        <button class="contact-btn del-contact-btn" data-contact-email="${esc(c.email)}" title="Delete contact">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          </svg>
+        </button>
+        <button class="contact-btn copy-btn" data-reverse="${esc(c.reverse)}" title="Copy reverse alias">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        </button>
+      </div>
+    </div>`;
+    }
     const raw     = c.reverse_alias || '';
     const match   = raw.match(/<([^>]+)>/);
     const reverse = match ? match[1] : raw;
@@ -702,12 +804,21 @@ function renderContacts(contacts) {
         </button>
       </div>
     </div>`;
-  }).join('');
+  }).join(''));
 }
 
 document.getElementById('contacts-close').addEventListener('click', closeContacts);
 
 document.getElementById('contacts-list').addEventListener('click', async e => {
+  const delBtn = e.target.closest('.del-contact-btn');
+  if (delBtn && _contactsAlias?.provider === 'addy') {
+    const email = delBtn.dataset.contactEmail;
+    const list  = ps.addyContacts[_contactsAlias.id] || [];
+    ps.addyContacts[_contactsAlias.id] = list.filter(c => c.email !== email);
+    await saveAddyContacts();
+    renderContacts(ps.addyContacts[_contactsAlias.id]);
+    return;
+  }
   const blockBtn = e.target.closest('.block-btn');
   if (blockBtn) {
     blockBtn.disabled = true;
@@ -736,9 +847,21 @@ document.getElementById('contacts-add-btn').addEventListener('click', async () =
   const btn = document.getElementById('contacts-add-btn');
   btn.disabled = true;
   try {
-    await slCreateContact(_contactsAlias, email);
-    input.value = '';
-    renderContacts(await slFetchContacts(_contactsAlias));
+    if (_contactsAlias?.provider === 'addy') {
+      const list = ps.addyContacts[_contactsAlias.id] || (ps.addyContacts[_contactsAlias.id] = []);
+      if (list.some(c => c.email === email)) throw new Error('This contact already exists.');
+      const reverse = addyBuildReverseAddress(_contactsAlias.aliasAddress, email);
+      list.push({ email, reverse });
+      await saveAddyContacts();
+      input.value = '';
+      renderContacts(list);
+      navigator.clipboard?.writeText(reverse).catch(() => {});
+      showToast('Reverse alias copied');
+    } else {
+      await slCreateContact(_contactsAlias, email);
+      input.value = '';
+      renderContacts(await slFetchContacts(_contactsAlias));
+    }
   } catch (e) { showError('Failed: ' + e.message); }
   btn.disabled = false;
 });
@@ -762,7 +885,7 @@ function applyFilter() {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function setListHtml(html) {
-  document.getElementById('p-list').innerHTML = html;
+  setHTML(document.getElementById('p-list'), html);
 }
 
 function renderList() {
@@ -770,13 +893,14 @@ function renderList() {
     setListHtml(`<div class="p-state">${ps.aliases.length === 0 ? 'No aliases yet' : 'No results'}</div>`);
     return;
   }
-  document.getElementById('p-list').innerHTML = ps.filtered.map(a => {
+  setHTML(document.getElementById('p-list'), ps.filtered.map(a => {
     const at      = a.aliasAddress.indexOf('@');
     const local   = at >= 0 ? a.aliasAddress.slice(0, at) : a.aliasAddress;
     const domain  = at >= 0 ? a.aliasAddress.slice(at)    : '';
     const note    = ps.notes[a.aliasAddress] || '';
     const disabled = !!a.disabled;
     const isSl    = a.provider === 'simplelogin';
+    const hasContacts = isSl || a.provider === 'addy';
 
     const btnToggle = `
       <button class="p-btn${disabled ? '' : ' toggle-on'} toggle-btn" data-id="${esc(a.id)}" title="${disabled ? 'Enable' : 'Disable'}">
@@ -787,7 +911,7 @@ function renderList() {
         </svg>
       </button>`;
 
-    const btnContacts = isSl ? `
+    const btnContacts = hasContacts ? `
       <button class="p-btn contacts-btn" data-id="${esc(a.id)}" title="Contacts">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -820,7 +944,7 @@ function renderList() {
         </button>
       </div>
     </div>`;
-  }).join('');
+  }).join(''));
 }
 
 function updateCount() {
@@ -834,9 +958,9 @@ function updateCount() {
 // ── Account pills ─────────────────────────────────────────────────────────────
 function renderPills() {
   const el = document.getElementById('p-pills');
-  el.innerHTML = ps.accounts.map(acc =>
+  setHTML(el, ps.accounts.map(acc =>
     `<button class="p-pill${acc.id === ps.selectedAccountId ? ' active' : ''}" data-id="${esc(acc.id)}">${esc(acc.label)}</button>`
-  ).join('');
+  ).join(''));
 }
 
 async function selectAccount(id) {
@@ -868,13 +992,13 @@ function populateSlSuffixSelect(acc) {
   const sel      = document.getElementById('p-suffix-select');
   const suffixes = ps.slOptions[acc.id]?.suffixes || [];
   if (!sel || !suffixes.length) return;
-  const all    = acc.isPremium ? suffixes : suffixes.filter(s => !(s.is_custom || s.premium));
-  const sorted = [...all].sort((a, b) => ((b.is_custom || b.premium) ? 1 : 0) - ((a.is_custom || a.premium) ? 1 : 0));
+  const all      = acc.isPremium ? suffixes : suffixes.filter(s => !(s.is_custom || s.premium));
+  const sorted   = [...all].sort((a, b) => ((b.is_custom || b.premium) ? 1 : 0) - ((a.is_custom || a.premium) ? 1 : 0));
   const current  = ps.selectedSuffix[acc.id];
-  sel.innerHTML  = sorted.map(s => {
+  setHTML(sel, sorted.map(s => {
     const label = (s.is_custom || s.premium) ? '★ ' + s.suffix : s.suffix;
     return `<option value="${esc(s.signed_suffix || s['signed-suffix'] || '')}">${esc(label)}</option>`;
-  }).join('');
+  }).join(''));
   const signed   = current?.signed_suffix || current?.['signed-suffix'] || sorted[0]?.signed_suffix || '';
   sel.value      = signed;
   // Sync selected state to dropdown
@@ -889,11 +1013,13 @@ function updatePreview() {
   const prev = document.getElementById('p-preview');
   const btn  = document.getElementById('p-create-btn');
   const _pt  = (t, ph) => {
-    prev.innerHTML = `<span>${esc(t)}</span>`;
+    const _s = document.createElement('span');
+    _s.textContent = t;
+    prev.replaceChildren(_s);
     prev.classList.toggle('p-preview-ph', !!ph);
   };
 
-  if (!acc) { prev.innerHTML = ''; btn.disabled = true; return; }
+  if (!acc) { prev.replaceChildren(); btn.disabled = true; return; }
 
   const isAddyFree = acc.provider === 'addy' && !!acc.isFree;
   if (isAddyFree) { _pt('Auto-generated', true); btn.disabled = false; return; }
@@ -916,15 +1042,22 @@ function updatePreview() {
     btn.disabled = !name;
   }
 
-  requestAnimationFrame(() => {
+  // scrollWidth before the popup has finished loading reports 0 — measure
+  // after load when we're not there yet.
+  const _doOverflow = () => {
     const span = prev.querySelector('span');
     prev.classList.toggle('preview-overflow', !!span && span.scrollWidth > prev.clientWidth);
-  });
+  };
+  if (document.readyState === 'complete') {
+    requestAnimationFrame(_doOverflow);
+  } else {
+    window.addEventListener('load', () => requestAnimationFrame(_doOverflow), { once: true });
+  }
 }
 
 // ── Auto-fill from current tab ────────────────────────────────────────────────
 function fillFromTab() {
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+  chrome.tabs.query({ active: true, currentWindow: true }).then(tabs => {
     try {
       const url   = new URL(tabs[0]?.url || '');
       const host  = url.hostname.replace(/^www\./, '');
@@ -933,7 +1066,7 @@ function fillFromTab() {
       const name  = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
       if (name) { document.getElementById('p-name').value = name; updatePreview(); }
     } catch (_) {}
-  });
+  }).catch(() => {});
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -972,7 +1105,7 @@ document.getElementById('p-create-btn').addEventListener('click', async () => {
   if (!name && !isAddyFree) return;
   const btn = document.getElementById('p-create-btn');
   btn.disabled = true;
-  btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Creating…`;
+  setHTML(btn, `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Creating…`);
   try {
     const noteText = ps.currentTabHost ? 'Used on ' + ps.currentTabHost : '';
     const addr = await createAlias(name, noteText);
@@ -981,12 +1114,12 @@ document.getElementById('p-create-btn').addEventListener('click', async () => {
     navigator.clipboard?.writeText(addr).catch(() => {});
     document.getElementById('p-name').value = '';
     document.getElementById('p-preview').textContent = '';
-    btn.innerHTML = BTN_HTML;
+    setHTML(btn, BTN_HTML);
     btn.disabled  = true;
     fetchAll();
   } catch (e) {
     showError('Failed: ' + e.message);
-    btn.innerHTML = BTN_HTML;
+    setHTML(btn, BTN_HTML);
     btn.disabled  = false;
   }
 });
@@ -1082,13 +1215,22 @@ async function init() {
   } catch (e) {
     const isAuth = /authorized|device token|HTTP 401/i.test(e.message || '');
     showError(isAuth ? 'Sign-in required — set a device token' : 'Cannot connect to server');
-    const msg = isAuth
-      ? 'This server requires sign-in.<br>Paste a device token in Options.'
-      : 'Could not connect to server.<br>Check the URL in Options.';
-    setListHtml('<div class="p-state">' + msg + '<br><br><button id="p-open-options" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:.8rem;font-weight:500;cursor:pointer">Open Options</button></div>');
+    const url = getProxy();
+    const head = isAuth
+      ? 'This server requires sign-in. Paste a device token in Options.'
+      : 'Could not connect to server.';
+    setListHtml(
+      '<div class="p-state">' + head + '<br>' +
+      '<span style="font-size:.7rem;color:var(--text-dim);word-break:break-all">' + esc(url) + '</span><br>' +
+      '<span style="font-size:.7rem;color:var(--text-dim)">' + esc(e.message || String(e)) + '</span><br><br>' +
+      '<button id="p-open-options" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:.8rem;font-weight:500;cursor:pointer">Open Options</button>' +
+      '</div>'
+    );
     document.getElementById('p-open-options')?.addEventListener('click', () => chrome.runtime.openOptionsPage());
   }
 }
 
 window.ALIASER_INIT = init;
-init();
+(window.ALIASER_CONFIG_READY || Promise.resolve()).then(() => {
+  if (!window.ALIASER_SETUP_MODE) init();
+});

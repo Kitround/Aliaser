@@ -11,6 +11,7 @@ const ps = {
   disabledAliases:   [],
   slOptions:         {},   // { accountId: {suffixes, prefixSuggestion, mailboxId} }
   selectedSuffix:    {},   // { accountId: {suffix, signed_suffix} }
+  addyContacts:      {},   // { aliasId: [{email, reverse}] } — server-side cache, no Addy API
   searchQuery:       '',
   selectedAccountId: null,
   currentTabHost:    '',
@@ -106,15 +107,17 @@ async function loadPopupState() {
     });
   // Credentials are no longer needed in the extension: tokens stay server-side
   // and are resolved by accountId on each proxy call.
-  const [sd, nd] = await Promise.all([
+  const [sd, nd, ad] = await Promise.all([
     safeFetch(proxy + '?action=state'),
     safeFetch(proxy + '?action=notes').catch(() => ({})),
+    safeFetch(proxy + '?action=addy-contacts').catch(() => ({})),
   ]);
 
   ps.accounts          = sd.accounts || [];
   ps.notes             = (nd && !Array.isArray(nd)) ? nd : {};
   ps.zimbraPlatformIds = sd.zimbraPlatformIds || {};
   ps.disabledAliases   = sd.disabledAliases || [];
+  ps.addyContacts      = (ad && typeof ad === 'object' && !Array.isArray(ad)) ? ad : {};
 
   (sd.consumerKeys || []).forEach(({ id, key }) => {
     const acc = ps.accounts.find(a => a.id === id);
@@ -130,6 +133,26 @@ async function saveNotes() {
       body: JSON.stringify(ps.notes),
     });
   } catch (e) { console.error('Failed to save notes:', e); }
+}
+
+// Addy has no contacts API — reverse addresses are derived locally and cached
+// server-side in json/addy-contacts.json, exactly as the dashboard does it.
+async function saveAddyContacts() {
+  try {
+    await fetch(getProxy() + '?action=addy-contacts', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(ps.addyContacts),
+    });
+  } catch (e) { console.error('Failed to save addy contacts:', e); }
+}
+
+function addyBuildReverseAddress(aliasEmail, recipientEmail) {
+  const at = aliasEmail.indexOf('@');
+  const aliasLocal = aliasEmail.slice(0, at), aliasDomain = aliasEmail.slice(at + 1);
+  const rat = recipientEmail.indexOf('@');
+  const recLocal = recipientEmail.slice(0, rat), recDomain = recipientEmail.slice(rat + 1);
+  return `${aliasLocal}+${recLocal}=${recDomain}@${aliasDomain}`;
 }
 
 async function saveServerState() {
@@ -503,6 +526,46 @@ async function cfToggleAlias(alias, enable) {
   await cfCall(acc, 'PUT', '/zones/' + acc.zoneId + '/email/routing/rules/' + alias.id, body);
 }
 
+// ── Haltman ───────────────────────────────────────────────────────────────────
+async function haltmanCall(acc, method, path, body = null) {
+  return pc('haltman', method, path, body, { accountId: acc?.id || '', token: acc?.token || '' });
+}
+
+async function haltmanFetchForAccount(acc) {
+  const items = [];
+  let offset = 0;
+  const limit = 100;
+  for (;;) {
+    const data  = await haltmanCall(acc, 'GET', `/api/alias/list?limit=${limit}&offset=${offset}`);
+    const batch = data?.items || [];
+    for (const a of batch) {
+      items.push({
+        id:            String(a.id),
+        aliasAddress:  a.address,
+        targetAddress: a.goto || '',
+        provider:      'haltman',
+        accountId:     acc.id,
+        accountLabel:  acc.label,
+        disabled:      !a.active,
+      });
+    }
+    if (batch.length < limit) break;
+    offset += limit;
+  }
+  return items;
+}
+
+async function haltmanCreateAlias(acc, aliasName) {
+  const data    = await haltmanCall(acc, 'POST', '/api/alias/create', { alias_handle: aliasName, alias_domain: acc.domain });
+  const address = data?.data?.address || (aliasName + '@' + acc.domain);
+  return { id: address, aliasAddress: address, targetAddress: data?.data?.goto || '',
+           provider: 'haltman', accountId: acc.id, accountLabel: acc.label };
+}
+
+async function haltmanDeleteAlias(alias) {
+  await haltmanCall(accForAlias(alias), 'POST', '/api/alias/delete', { alias: alias.aliasAddress });
+}
+
 // Turn a raw provider/proxy error into a human-readable explanation.
 function describeProviderError(e) {
   const msg = (e && e.message) || String(e || '');
@@ -524,7 +587,7 @@ function describeProviderError(e) {
 async function fetchAll() {
   setListHtml('<div class="p-state"><div class="p-spinner"></div></div>');
   const apiProviders = new Set(['simplelogin', 'addy', 'cloudflare']);
-  const labelFor     = { ovh: 'OVH', infomaniak: 'IK', simplelogin: 'SL', addy: 'Addy', cloudflare: 'CF' };
+  const labelFor     = { ovh: 'OVH', infomaniak: 'IK', simplelogin: 'SL', addy: 'Addy', cloudflare: 'CF', haltman: 'Haltman' };
   const fetchFor = acc => {
     switch (acc.provider) {
       case 'ovh':         return ovhFetchForAccount(acc);
@@ -532,8 +595,7 @@ async function fetchAll() {
       case 'simplelogin': return slFetchForAccount(acc);
       case 'addy':        return addyFetchForAccount(acc);
       case 'cloudflare':  return cfFetchForAccount(acc);
-      // Haltman is dashboard-only: it yields no aliases here and shows no error.
-      // Deliberate — do not turn this into a user-facing message.
+      case 'haltman':     return haltmanFetchForAccount(acc);
       default:            return Promise.resolve([]);
     }
   };
@@ -572,6 +634,7 @@ async function createAlias(name, note = '') {
     case 'simplelogin': return (await slCreateAlias(acc, name, note)).aliasAddress;
     case 'addy':        return (await addyCreateAlias(acc, acc.isFree ? '' : name, note)).aliasAddress;
     case 'cloudflare':  return (await cfCreateAlias(acc, name)).aliasAddress;
+    case 'haltman':     return (await haltmanCreateAlias(acc, name)).aliasAddress;
     default: throw new Error('Unsupported provider');
   }
 }
@@ -585,6 +648,7 @@ async function deleteAlias(alias) {
     case 'simplelogin': await slDeleteAlias(alias);        break;
     case 'addy':        await addyDeleteAlias(alias);      break;
     case 'cloudflare':  await cfDeleteAlias(alias, acc);   break;
+    case 'haltman':     await haltmanDeleteAlias(alias);   break;
   }
   ps.aliases = ps.aliases.filter(a => !(a.id === alias.id && a.accountId === alias.accountId));
   delete ps.notes[alias.aliasAddress];
@@ -609,11 +673,12 @@ async function toggleAlias(alias) {
         case 'addy':        await addyToggleAlias(alias, true);   break;
         case 'cloudflare':  await cfToggleAlias(alias, true);     break;
         case 'ovh':
-        case 'infomaniak': {
+        case 'infomaniak':
+        case 'haltman': {
           const name     = alias.aliasAddress.includes('@') ? alias.aliasAddress.split('@')[0] : alias.aliasAddress;
-          const newAlias = alias.provider === 'infomaniak'
-            ? await ikCreateAlias(acc, name)
-            : await ovhCreateAlias(acc, name);
+          const newAlias = alias.provider === 'infomaniak' ? await ikCreateAlias(acc, name)
+                         : alias.provider === 'haltman'    ? await haltmanCreateAlias(acc, name)
+                         :                                   await ovhCreateAlias(acc, name);
           const i = ps.aliases.findIndex(a => a.aliasAddress === alias.aliasAddress && a.accountId === alias.accountId);
           if (i !== -1) ps.aliases[i] = { ...newAlias, disabled: false };
           ps.disabledAliases = ps.disabledAliases.filter(d =>
@@ -629,9 +694,11 @@ async function toggleAlias(alias) {
         case 'addy':        await addyToggleAlias(alias, false);  break;
         case 'cloudflare':  await cfToggleAlias(alias, false);    break;
         case 'ovh':
-        case 'infomaniak': {
-          if (alias.provider === 'infomaniak') await ikDeleteAlias(alias, acc);
-          else                                  await ovhDeleteAlias(alias, acc);
+        case 'infomaniak':
+        case 'haltman': {
+          if      (alias.provider === 'infomaniak') await ikDeleteAlias(alias, acc);
+          else if (alias.provider === 'haltman')    await haltmanDeleteAlias(alias);
+          else                                      await ovhDeleteAlias(alias, acc);
           const { id: _, pending: __, ...rest } = alias;
           if (!ps.disabledAliases.some(d => d.aliasAddress === rest.aliasAddress && d.accountId === rest.accountId))
             ps.disabledAliases.push({ ...rest, disabled: true });
@@ -659,6 +726,12 @@ async function openContacts(alias) {
   document.getElementById('contacts-add-btn').disabled = false;
   setHTML(document.getElementById('contacts-list'), '<div class="contacts-state"><div class="p-spinner"></div></div>');
   document.getElementById('contacts-panel').classList.add('open');
+  if (alias.provider === 'addy') {
+    // No Addy contacts API: the reverse address is derived from the alias, so
+    // the list is whatever we cached server-side.
+    renderContacts(ps.addyContacts[alias.id] || []);
+    return;
+  }
   try {
     const contacts = await slFetchContacts(alias);
     renderContacts(contacts);
@@ -678,7 +751,30 @@ function renderContacts(contacts) {
     setHTML(el, '<div class="contacts-state">No contacts yet.<br>Add one to get a reverse alias.</div>');
     return;
   }
+  const isAddy = _contactsAlias?.provider === 'addy';
   setHTML(el, contacts.map(c => {
+    if (isAddy) {
+      return `<div class="contact-item" data-contact-email="${esc(c.email)}">
+      <div class="contact-info">
+        <div class="contact-email">${esc(c.email)}</div>
+        <div class="contact-reverse">${esc(c.reverse)}</div>
+      </div>
+      <div class="contact-actions">
+        <button class="contact-btn del-contact-btn" data-contact-email="${esc(c.email)}" title="Delete contact">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          </svg>
+        </button>
+        <button class="contact-btn copy-btn" data-reverse="${esc(c.reverse)}" title="Copy reverse alias">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        </button>
+      </div>
+    </div>`;
+    }
     const raw     = c.reverse_alias || '';
     const match   = raw.match(/<([^>]+)>/);
     const reverse = match ? match[1] : raw;
@@ -710,6 +806,15 @@ function renderContacts(contacts) {
 document.getElementById('contacts-close').addEventListener('click', closeContacts);
 
 document.getElementById('contacts-list').addEventListener('click', async e => {
+  const delBtn = e.target.closest('.del-contact-btn');
+  if (delBtn && _contactsAlias?.provider === 'addy') {
+    const email = delBtn.dataset.contactEmail;
+    const list  = ps.addyContacts[_contactsAlias.id] || [];
+    ps.addyContacts[_contactsAlias.id] = list.filter(c => c.email !== email);
+    await saveAddyContacts();
+    renderContacts(ps.addyContacts[_contactsAlias.id]);
+    return;
+  }
   const blockBtn = e.target.closest('.block-btn');
   if (blockBtn) {
     blockBtn.disabled = true;
@@ -738,9 +843,21 @@ document.getElementById('contacts-add-btn').addEventListener('click', async () =
   const btn = document.getElementById('contacts-add-btn');
   btn.disabled = true;
   try {
-    await slCreateContact(_contactsAlias, email);
-    input.value = '';
-    renderContacts(await slFetchContacts(_contactsAlias));
+    if (_contactsAlias?.provider === 'addy') {
+      const list = ps.addyContacts[_contactsAlias.id] || (ps.addyContacts[_contactsAlias.id] = []);
+      if (list.some(c => c.email === email)) throw new Error('This contact already exists.');
+      const reverse = addyBuildReverseAddress(_contactsAlias.aliasAddress, email);
+      list.push({ email, reverse });
+      await saveAddyContacts();
+      input.value = '';
+      renderContacts(list);
+      navigator.clipboard?.writeText(reverse).catch(() => {});
+      showToast('Reverse alias copied');
+    } else {
+      await slCreateContact(_contactsAlias, email);
+      input.value = '';
+      renderContacts(await slFetchContacts(_contactsAlias));
+    }
   } catch (e) { showError('Failed: ' + e.message); }
   btn.disabled = false;
 });
@@ -779,6 +896,7 @@ function renderList() {
     const note    = ps.notes[a.aliasAddress] || '';
     const disabled = !!a.disabled;
     const isSl    = a.provider === 'simplelogin';
+    const hasContacts = isSl || a.provider === 'addy';
 
     const btnToggle = `
       <button class="p-btn${disabled ? '' : ' toggle-on'} toggle-btn" data-id="${esc(a.id)}" title="${disabled ? 'Enable' : 'Disable'}">
@@ -789,7 +907,7 @@ function renderList() {
         </svg>
       </button>`;
 
-    const btnContacts = isSl ? `
+    const btnContacts = hasContacts ? `
       <button class="p-btn contacts-btn" data-id="${esc(a.id)}" title="Contacts">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
