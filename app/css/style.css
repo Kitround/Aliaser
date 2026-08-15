@@ -207,6 +207,16 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .confirm-alias{font-family:var(--mono);font-size:.8rem;color:var(--accent);margin-top:2px}
 .confirm-actions{display:flex;gap:7px}
 .confirm-actions .btn{flex:1}
+/* ── Sort menu ── */
+.sort-overlay{position:fixed;inset:0;z-index:90;display:flex;justify-content:flex-end;align-items:flex-start;padding:56px 20px 0;opacity:0;pointer-events:none;transition:opacity var(--t)}
+.sort-overlay.open{opacity:1;pointer-events:all}
+.sort-menu{background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:6px;width:196px;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+.sort-menu-title{font-family:var(--mono);font-size:.6rem;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.12em;padding:6px 8px 4px}
+.sort-option{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;background:transparent;border:none;border-radius:var(--r);padding:8px;color:var(--text-muted);font-family:var(--sans);font-size:.78rem;cursor:pointer;transition:all var(--t)}
+.sort-option svg{opacity:0;flex-shrink:0}
+.sort-option-active{color:var(--accent);background:var(--accent-soft)}
+.sort-option-active svg{opacity:1}
+#btn-sort.active{color:var(--accent)}
 /* ── Mobile bar ── */
 .mob-search{display:none}
 .mobile-bar{display:none;position:fixed;bottom:36px;left:50%;transform:translateX(-50%);z-index:50;align-items:center;gap:6px;background:rgba(23,23,23,.95);border:1px solid var(--border2);border-radius:50px;padding:8px 14px;box-shadow:0 4px 20px rgba(0,0,0,.4)}
@@ -237,6 +247,15 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .mob-search.search-wrap{display:block;width:auto;margin:10px 12px 0;flex-shrink:0}
   .mob-search .search-input{padding:10px 12px 10px 35px;transition:border-color .18s ease,box-shadow .18s ease}
   .mob-search .search-icon{width:15px;height:15px;left:12px}
+  /* Floats above the mobile bar (bottom:36px) instead of sitting flush on the
+     screen edge, where the last option lands under the thumb and the browser's
+     own toolbar. 100dvh so that toolbar cannot eat into the sheet either. */
+  .sort-overlay{background:rgba(0,0,0,.5);align-items:flex-end;justify-content:center;padding:0;height:100dvh}
+  .sort-menu{width:calc(100% - 24px);margin-bottom:calc(36px + env(safe-area-inset-bottom))}
+  .sort-overlay.open .sort-menu{animation:sheet-in .18s ease}
+  @keyframes sheet-in{from{transform:translateY(calc(100% + 36px))}to{transform:translateY(0)}}
+  .sort-menu-title{padding:8px}
+  .sort-option{padding:13px 10px;font-size:.9rem}
   .contact-actions{display:flex;flex-direction:row;gap:2px;flex-shrink:0}
   .contact-actions .icon-btn{width:30px;height:30px}
   .contact-actions .icon-btn svg{width:17px;height:17px}
@@ -320,6 +339,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .btn-secondary:hover:not(:disabled){border-color:var(--border2);background:var(--surface3)}
   .btn-danger:hover:not(:disabled){background:var(--red-soft)}
   .btn-ghost:hover:not(:disabled){background:var(--surface2);color:var(--text)}
+  .sort-option:not(.sort-option-active):hover{background:var(--surface2);color:var(--text)}
   .bar-btn:hover{background:var(--surface2);color:var(--accent)}
   .bar-btn.primary:hover{background:var(--accent-hover)}
   .account-pill:hover{border-color:var(--border2);color:var(--text)}
@@ -336,6 +356,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .btn-secondary:active:not(:disabled){border-color:var(--border2);background:var(--surface3)}
 .btn-danger:active:not(:disabled){background:var(--red-soft)}
 .btn-ghost:active:not(:disabled){background:var(--surface2);color:var(--text)}
+.sort-option:active{background:var(--surface2)}
 .bar-btn:active{background:var(--surface2);color:var(--accent)}
 .bar-btn.primary:active{background:var(--accent-hover)}
 .account-pill:active{border-color:var(--border2);color:var(--text)}

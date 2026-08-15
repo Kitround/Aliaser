@@ -13,6 +13,8 @@ const state={
   lastSelectedAccountId:null,
   pendingDeleteAlias:null,
   searchQuery:'',
+  sortKey:'name-asc',
+  aliasSeen:{},// { "accountId|aliasAddress": epoch ms } — first sighting, persisted
   notes:{},
   disabledAliases:[],
   credentials:{},
@@ -47,6 +49,7 @@ async function loadServerState(){
     state.accounts=data.accounts||[];
     state.ovhZimbraPlatformIds=data.zimbraPlatformIds||{};
     state.disabledAliases=data.disabledAliases||[];
+    state.aliasSeen=(data.aliasSeen&&typeof data.aliasSeen==='object'&&!Array.isArray(data.aliasSeen))?data.aliasSeen:{};
     if(!Object.keys(state.ovhZimbraPlatformIds).length&&data.zimbraPlatformId){
       const firstOvh=state.accounts.find(a=>a.provider==='ovh');
       if(firstOvh)state.ovhZimbraPlatformIds[firstOvh.id]=data.zimbraPlatformId;
@@ -80,9 +83,11 @@ async function saveServerState(){
     zimbraPlatformIds:state.ovhZimbraPlatformIds||{},
     zimbraPlatformId:'',
     disabledAliases:allDisabled,
+    aliasSeen:state.aliasSeen,
   };
   try{
     _checkAuth(await fetch(PROXY+'?action=state',{method:'POST',headers:_writeHeaders(),body:JSON.stringify(payload)}));
+    _seenDirty=false;
   }catch(e){console.error('Failed to save server state:',e);}
 }
 
@@ -351,6 +356,7 @@ async function slFetchForAccount(acc){
         slNbReply:a.nb_reply||0,
         slNbBlock:a.nb_block||0,
         slLatestActivity:a.latest_activity||null,
+        createdAt:toEpoch(a.creation_timestamp||a.creation_date),
       });
       if(a.note&&a.note.trim())state.notes[a.email]=a.note.trim();
     });
@@ -484,6 +490,7 @@ async function addyFetchForAccount(acc){
         addyNbReply:a.emails_replied||0,
         addyNbSend:a.emails_sent||0,
         addyNbBlock:a.emails_blocked||0,
+        createdAt:toEpoch(a.created_at),
       });
       if(a.description&&a.description.trim())state.notes[a.email]=a.description.trim();
     });
@@ -701,7 +708,9 @@ async function fetchAliases(){
           );
           next=[...next,...disabledForAcc.map(d=>({...d,disabled:true}))];
         }
-        state.aliases=next.sort((a,b)=>a.aliasAddress.localeCompare(b.aliasAddress));
+        state.aliases=next;
+        stampSeen(next);
+        sortAliases();
         applyFilter();scheduleRender();
       })
       .catch(e=>{
@@ -713,6 +722,7 @@ async function fetchAliases(){
       })
   );
   await Promise.allSettled(tasks);
+  if(_seenDirty)await saveServerState();
 }
 
 async function createAlias(aliasName,accountId,note=''){
@@ -728,9 +738,9 @@ async function createAlias(aliasName,accountId,note=''){
   else if(isAddy)fl=aliasName?(aliasName+'@'+(acc.domain||'anonaddy.me')):'Generating…';
   else fl=resolvedName.includes('@')?resolvedName:resolvedName+'@'+domain;
   const placeholder={id:'__pending__'+genId(),aliasAddress:fl,targetAddress:isSL||isAddy?acc.label:fa,
-    provider:acc.provider,accountId:acc.id,accountLabel:acc.label,pending:true};
+    provider:acc.provider,accountId:acc.id,accountLabel:acc.label,pending:true,createdAt:Date.now()};
   state.aliases.unshift(placeholder);
-  state.aliases.sort((a,b)=>a.aliasAddress.localeCompare(b.aliasAddress));
+  sortAliases();
   applyFilter();render();
   try{
     let newAlias;
@@ -743,7 +753,8 @@ async function createAlias(aliasName,accountId,note=''){
     const idx=state.aliases.findIndex(a=>a.id===placeholder.id);
     if(idx!==-1)state.aliases[idx]=newAlias;
     else state.aliases.unshift(newAlias);
-    state.aliases.sort((a,b)=>a.aliasAddress.localeCompare(b.aliasAddress));
+    stampSeen([newAlias]);
+    sortAliases();
     if(note.trim()){state.notes[newAlias.aliasAddress]=note.trim();await saveNotes();}
     await saveServerState();
     applyFilter();render();
@@ -770,6 +781,9 @@ async function deleteAlias(alias){
     else await ovhDeleteAlias(alias,acc);
     if(state.notes[alias.aliasAddress]){delete state.notes[alias.aliasAddress];await saveNotes();}
     state.disabledAliases=state.disabledAliases.filter(d=>!(d.aliasAddress===alias.aliasAddress&&d.accountId===alias.accountId));
+    // Recreating the same address later must count as a new alias, not resurrect
+    // the old date.
+    delete state.aliasSeen[seenKey(alias)];
     await saveServerState();
   }catch(e){
     state.aliases=backup;
@@ -849,6 +863,55 @@ async function enableAlias(alias){
   }
 }
 
+// ── Sorting ───────────────────────────────────────────────────────────────────
+// Only SimpleLogin and Addy hand back a creation date. OVH, Infomaniak,
+// Cloudflare and Haltman return none at all, so for those the date is the first
+// time this install saw the alias (`aliasSeen` in state.json): exact for aliases
+// created from here, "first sync after the update" for everything older — those
+// share one timestamp and fall back to the alphabetical tiebreak.
+const SORT_LS_KEY='aliaser_sort';
+const SORT_DEFAULT='name-asc';
+const SORTS={
+  'name-asc' :{label:'Name A → Z',   cmp:(a,b)=>byName(a,b)},
+  'name-desc':{label:'Name Z → A',   cmp:(a,b)=>byName(b,a)},
+  'date-desc':{label:'Newest first', cmp:(a,b)=>dateOf(b)-dateOf(a)||byName(a,b)},
+  'date-asc' :{label:'Oldest first', cmp:(a,b)=>dateOf(a)-dateOf(b)||byName(a,b)},
+};
+function byName(a,b){return (a.aliasAddress||'').localeCompare(b.aliasAddress||'');}
+function seenKey(a){return a.accountId+'|'+a.aliasAddress;}
+// Unix seconds (SimpleLogin) or a date string, ISO or space-separated (Addy —
+// Safari rejects the space form). 0 when unusable: those sort last.
+function toEpoch(v){
+  if(typeof v==='number')return v>1e11?v:v*1000;
+  if(!v)return 0;
+  const t=Date.parse(String(v).replace(' ','T'));
+  return isFinite(t)?t:0;
+}
+function dateOf(a){return a.createdAt||state.aliasSeen[seenKey(a)]||0;}
+function sortAliases(){state.aliases.sort((SORTS[state.sortKey]||SORTS[SORT_DEFAULT]).cmp);}
+// List separators (mobile only — hidden on desktop): a letter when sorting by
+// name, the month when sorting by date.
+const _monthFmt=new Intl.DateTimeFormat('en-US',{month:'short',year:'numeric'});
+function groupOf(a){
+  if(state.sortKey.indexOf('date')===0){
+    const t=dateOf(a);
+    return t?_monthFmt.format(new Date(t)):'Unknown date';
+  }
+  // A provider can hand back an alias with an empty address; indexing [0] on it
+  // would throw and blank the whole list.
+  return (a.aliasAddress||'?')[0].toUpperCase();
+}
+// Stamps every alias we have never seen before. Sets the dirty flag instead of
+// saving: a refresh calls this once per provider, one write at the end is enough.
+let _seenDirty=false;
+function stampSeen(list){
+  list.forEach(a=>{
+    const k=seenKey(a);
+    if(!state.aliasSeen[k]){state.aliasSeen[k]=a.createdAt||Date.now();_seenDirty=true;}
+  });
+}
+try{const s=localStorage.getItem(SORT_LS_KEY);if(s&&SORTS[s])state.sortKey=s;}catch{}
+
 function applyFilter(){
   const q=state.searchQuery.toLowerCase();
   state.filteredAliases=q?state.aliases.filter(a=>
@@ -865,12 +928,10 @@ function renderList(){
   const listEl=document.getElementById('alias-list');
   if(!hasList){if(listEl.innerHTML)listEl.innerHTML='';return;}
   let html='';
-  let currentLetter='';
+  let currentGroup='';
   state.filteredAliases.forEach(a=>{
-    // A provider can hand back an alias with an empty address; indexing [0] on
-    // it would throw and blank the whole list.
-    const letter=(a.aliasAddress||'?')[0].toUpperCase();
-    if(letter!==currentLetter){currentLetter=letter;html+=`<div class="alias-letter">${letter}</div>`;}
+    const group=groupOf(a);
+    if(group!==currentGroup){currentGroup=group;html+=`<div class="alias-letter">${esc(group)}</div>`;}
     const providerClass=
       a.provider==='infomaniak'?'ik':
       a.provider==='simplelogin'?'sl':
@@ -1024,6 +1085,7 @@ function removeAccount(id){
   state.aliases=state.aliases.filter(a=>a.accountId!==id);
   state.filteredAliases=state.filteredAliases.filter(a=>a.accountId!==id);
   state.disabledAliases=state.disabledAliases.filter(a=>a.accountId!==id);
+  Object.keys(state.aliasSeen).forEach(k=>{if(k.startsWith(id+'|'))delete state.aliasSeen[k];});
   delete state.ovhZimbraPlatformIds[id];
   delete state.ovhZimbraAccountIds[id];
   delete state.accountErrors[id];
@@ -2222,6 +2284,38 @@ document.getElementById('search-clear').addEventListener('click',()=>{
 document.getElementById('search-input').addEventListener('input',e=>{
   state.searchQuery=e.target.value;document.getElementById('search-clear').style.display=e.target.value?'':'none';applyFilter();scheduleRender();
 });
+
+// ── Sort menu ─────────────────────────────────────────────────────────────────
+// One menu, two triggers: dropdown under the topbar on desktop, bottom sheet on
+// mobile. The layout split is CSS-only; this just opens, closes and applies.
+const _sortOverlay=document.getElementById('sort-overlay');
+function renderSortMenu(){
+  document.getElementById('sort-options').innerHTML=Object.keys(SORTS).map(k=>
+    `<button class="sort-option${k===state.sortKey?' sort-option-active':''}" data-sort="${esc(k)}">
+      <span>${esc(SORTS[k].label)}</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+    </button>`).join('');
+  const off=state.sortKey!==SORT_DEFAULT;
+  document.getElementById('btn-sort')?.classList.toggle('active',off);
+  document.getElementById('mob-sort')?.classList.toggle('active',off);
+}
+function closeSortMenu(){setThemeColor(false);_sortOverlay.classList.remove('open');}
+['btn-sort','mob-sort'].forEach(id=>document.getElementById(id)?.addEventListener('click',()=>{
+  if(_sortOverlay.classList.contains('open')){closeSortMenu();return;}
+  renderSortMenu();setThemeColor(true);_sortOverlay.classList.add('open');
+}));
+_sortOverlay.addEventListener('click',e=>{
+  if(e.target===_sortOverlay){closeSortMenu();return;}
+  const opt=e.target.closest('.sort-option');
+  if(!opt)return;
+  state.sortKey=SORTS[opt.dataset.sort]?opt.dataset.sort:SORT_DEFAULT;
+  try{localStorage.setItem(SORT_LS_KEY,state.sortKey);}catch{}
+  sortAliases();applyFilter();closeSortMenu();render();
+  // The order changed under the user — put them back at the top of the list.
+  const sc=document.querySelector('.content-scroll');if(sc)sc.scrollTop=0;
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&_sortOverlay.classList.contains('open'))closeSortMenu();});
+renderSortMenu();
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 // Enable :active states on iOS Safari (requires at least one touchstart listener on document)
