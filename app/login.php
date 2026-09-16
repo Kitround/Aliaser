@@ -187,7 +187,16 @@ $csrf = form_csrf();
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Aliaser — Sign in</title>
+<!-- Same install tags as index.html: Safari lands here when it has no session,
+     and adding to the Home Screen from a page without them installs a generic
+     icon that opens the app with Safari's controls. -->
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="images/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="images/favicon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Aliaser">
+<meta name="theme-color" content="#0f0f0f">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f0f;color:#e0e0e0;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px}

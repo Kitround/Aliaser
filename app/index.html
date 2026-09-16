@@ -8,7 +8,8 @@
 <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="images/favicon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- black, not black-translucent: iOS 27 paints a Liquid Glass blur over a translucent status bar and nothing on the page stops it. Read at install time. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Aliaser">
 <meta name="theme-color" content="#0f0f0f" id="theme-color-meta">
 <link rel="stylesheet" href="css/style.css?v=15">
