@@ -65,11 +65,22 @@ html,body{width:420px;height:580px;overflow:hidden;display:flex;flex-direction:c
 .p-create-btn:disabled{opacity:.4;cursor:default}
 
 /* Search */
-.p-search-wrap{padding:8px 14px;position:relative}
+.p-search-wrap{padding:8px 14px;position:relative;display:flex;gap:6px}
 .p-search-icon{position:absolute;left:23px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none}
-.p-search{width:100%;height:30px;padding:0 10px 0 28px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;font-size:.78rem;font-family:var(--mono);color:var(--text);outline:none;transition:border-color .15s}
+.p-search{flex:1;min-width:0;width:100%;height:30px;padding:0 10px 0 28px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;font-size:.78rem;font-family:var(--mono);color:var(--text);outline:none;transition:border-color .15s}
 .p-search:focus{border-color:var(--accent)}
 .p-search::placeholder{color:var(--text-dim)}
+/* ── Sort ── */
+.p-sort-btn{flex-shrink:0;width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text-muted);cursor:pointer;transition:all var(--t)}
+.p-sort-btn:hover{color:var(--text);border-color:var(--text-dim)}
+.p-sort-btn.active{color:var(--accent);border-color:var(--accent)}
+.p-sort-menu{display:none;position:absolute;top:41px;right:14px;z-index:30;width:152px;padding:5px;background:var(--surface);border:1px solid var(--border2);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.5)}
+.p-sort-menu.open{display:block}
+.p-sort-opt{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:7px;background:transparent;border:none;border-radius:5px;color:var(--text-muted);font-family:var(--sans);font-size:.75rem;text-align:left;cursor:pointer;transition:all var(--t)}
+.p-sort-opt:hover{background:var(--surface3);color:var(--text)}
+.p-sort-opt svg{opacity:0;flex-shrink:0}
+.p-sort-opt-active,.p-sort-opt-active:hover{color:var(--accent);background:var(--accent-soft)}
+.p-sort-opt-active svg{opacity:1}
 
 /* ── Scrollable list ── */
 .p-list{flex:1;overflow-y:auto;min-height:0}
@@ -224,6 +235,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
       <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
     </svg>
     <input id="p-search" class="p-search" type="text" placeholder="Find aliases…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+    <button class="p-sort-btn" id="p-sort-btn" title="Sort">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 4v16"/><polyline points="3 8 7 4 11 8"/><path d="M17 20V4"/><polyline points="13 16 17 20 21 16"/>
+      </svg>
+    </button>
+    <div class="p-sort-menu" id="p-sort-menu"></div>
   </div>
 </div>
 

@@ -13,6 +13,8 @@ const ps = {
   selectedSuffix:    {},   // { accountId: {suffix, signed_suffix} }
   addyContacts:      {},   // { aliasId: [{email, reverse}] } — server-side cache, no Addy API
   searchQuery:       '',
+  sortKey:           'name-asc',
+  aliasSeen:         {},   // { "accountId|aliasAddress": epoch ms } — shared with the dashboard
   selectedAccountId: null,
   currentTabHost:    '',
 };
@@ -121,6 +123,7 @@ async function loadPopupState() {
   ps.notes             = (nd && !Array.isArray(nd)) ? nd : {};
   ps.zimbraPlatformIds = sd.zimbraPlatformIds || {};
   ps.disabledAliases   = sd.disabledAliases || [];
+  ps.aliasSeen         = (sd.aliasSeen && typeof sd.aliasSeen === 'object' && !Array.isArray(sd.aliasSeen)) ? sd.aliasSeen : {};
   ps.addyContacts      = (ad && typeof ad === 'object' && !Array.isArray(ad)) ? ad : {};
 
   (sd.consumerKeys || []).forEach(({ id, key }) => {
@@ -176,9 +179,13 @@ async function saveServerState() {
     zimbraPlatformIds: ps.zimbraPlatformIds || {},
     zimbraPlatformId:  '',
     disabledAliases:   allDisabled,
+    // writeState() replaces the whole file — omitting this drops every recorded
+    // "date added" the moment the popup toggles an alias.
+    aliasSeen:         ps.aliasSeen,
   };
   try {
     await fetch(getProxy() + '?action=state', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(payload) });
+    _seenDirty = false;
   } catch (e) { console.error('Failed to save state:', e); }
 }
 
@@ -320,6 +327,7 @@ async function slFetchForAccount(acc) {
         slNbReply:      a.nb_reply   || 0,
         slNbBlock:      a.nb_block   || 0,
         slLatestActivity: a.latest_activity || null,
+        createdAt:      toEpoch(a.creation_timestamp || a.creation_date),
       });
       if (a.note && a.note.trim()) ps.notes[a.email] = a.note.trim();
     });
@@ -445,6 +453,7 @@ async function addyFetchForAccount(acc) {
         addyNbForward: a.emails_forwarded || 0,
         addyNbReply:   a.emails_replied   || 0,
         addyNbBlock:   a.emails_blocked   || 0,
+        createdAt:     toEpoch(a.created_at),
       });
       if (a.description && a.description.trim()) ps.notes[a.email] = a.description.trim();
     });
@@ -616,6 +625,7 @@ async function fetchAll() {
           next = [...next, ...disabledForAcc.map(d => ({ ...d, disabled: true }))];
         }
         ps.aliases = next;
+        stampSeen(next);
         applyFilter();
         renderList();
         updateCount();
@@ -626,6 +636,7 @@ async function fetchAll() {
       })
   );
   await Promise.allSettled(tasks);
+  if (_seenDirty) await saveServerState();
 }
 
 // ── Create alias ──────────────────────────────────────────────────────────────
@@ -870,6 +881,43 @@ document.getElementById('contacts-new-email').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('contacts-add-btn').click();
 });
 
+// ── Sorting ───────────────────────────────────────────────────────────────────
+// Same four orders as the dashboard. Only SimpleLogin and Addy hand back a
+// creation date; for OVH, Infomaniak, Cloudflare and Haltman the date is the
+// first time an Aliaser client saw the alias — recorded in state.json as
+// aliasSeen, so the popup and the dashboard agree on it.
+const SORT_LS_KEY  = 'aliaser_sort';
+const SORT_DEFAULT = 'name-asc';
+const SORTS = {
+  'name-asc':  { label: 'Name A → Z',   cmp: (a, b) => byName(a, b) },
+  'name-desc': { label: 'Name Z → A',   cmp: (a, b) => byName(b, a) },
+  'date-desc': { label: 'Newest first', cmp: (a, b) => dateOf(b) - dateOf(a) || byName(a, b) },
+  'date-asc':  { label: 'Oldest first', cmp: (a, b) => dateOf(a) - dateOf(b) || byName(a, b) },
+};
+function byName(a, b) { return (a.aliasAddress || '').localeCompare(b.aliasAddress || ''); }
+function seenKey(a)   { return a.accountId + '|' + a.aliasAddress; }
+// Unix seconds (SimpleLogin) or a date string, ISO or space-separated (Addy —
+// Safari rejects the space form). 0 when unusable: those sort last.
+function toEpoch(v) {
+  if (typeof v === 'number') return v > 1e11 ? v : v * 1000;
+  if (!v) return 0;
+  const t = Date.parse(String(v).replace(' ', 'T'));
+  return isFinite(t) ? t : 0;
+}
+function dateOf(a) { return a.createdAt || ps.aliasSeen[seenKey(a)] || 0; }
+// Stamps every alias no client has seen before. Sets the dirty flag instead of
+// saving: one write at the end of the refresh is enough.
+let _seenDirty = false;
+function stampSeen(list) {
+  list.forEach(a => {
+    const k = seenKey(a);
+    if (!ps.aliasSeen[k]) { ps.aliasSeen[k] = a.createdAt || Date.now(); _seenDirty = true; }
+  });
+}
+// A view preference, not a credential — losing it to "clear browsing data" only
+// restores the default order, so localStorage is good enough here.
+try { const s = localStorage.getItem(SORT_LS_KEY); if (s && SORTS[s]) ps.sortKey = s; } catch (e) {}
+
 // ── Filter ────────────────────────────────────────────────────────────────────
 function applyFilter() {
   const q = ps.searchQuery.toLowerCase();
@@ -880,7 +928,7 @@ function applyFilter() {
         (a.accountLabel || '').toLowerCase().includes(q) ||
         (ps.notes[a.aliasAddress] || '').toLowerCase().includes(q))
     : [...ps.aliases]
-  ).sort((a, b) => a.aliasAddress.localeCompare(b.aliasAddress));
+  ).sort((SORTS[ps.sortKey] || SORTS[SORT_DEFAULT]).cmp);
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -1129,6 +1177,40 @@ document.getElementById('p-search').addEventListener('input', e => {
   applyFilter();
   renderList();
 });
+
+// ── Sort menu ─────────────────────────────────────────────────────────────────
+// Dropdown anchored to the button sitting right of the search field. No bottom
+// sheet here — the popup is 420×580, a dropdown is the whole story.
+function renderSortMenu() {
+  setHTML(document.getElementById('p-sort-menu'), Object.keys(SORTS).map(k =>
+    `<button class="p-sort-opt${k === ps.sortKey ? ' p-sort-opt-active' : ''}" data-sort="${esc(k)}">
+      <span>${esc(SORTS[k].label)}</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+    </button>`).join(''));
+  document.getElementById('p-sort-btn').classList.toggle('active', ps.sortKey !== SORT_DEFAULT);
+}
+document.getElementById('p-sort-btn').addEventListener('click', e => {
+  // Without this the document-level handler below closes it right back.
+  e.stopPropagation();
+  const menu = document.getElementById('p-sort-menu');
+  if (menu.classList.contains('open')) { menu.classList.remove('open'); return; }
+  renderSortMenu();
+  menu.classList.add('open');
+});
+document.getElementById('p-sort-menu').addEventListener('click', e => {
+  const opt = e.target.closest('.p-sort-opt');
+  if (!opt) return;
+  ps.sortKey = SORTS[opt.dataset.sort] ? opt.dataset.sort : SORT_DEFAULT;
+  try { localStorage.setItem(SORT_LS_KEY, ps.sortKey); } catch (err) {}
+  document.getElementById('p-sort-menu').classList.remove('open');
+  renderSortMenu();
+  applyFilter();
+  renderList();
+  // The order changed under the user — put them back at the top of the list.
+  document.getElementById('p-list').scrollTop = 0;
+});
+document.addEventListener('click', () => document.getElementById('p-sort-menu').classList.remove('open'));
+renderSortMenu();
 
 document.getElementById('p-list').addEventListener('click', e => {
   // Match on id AND accountId: Infomaniak alias ids are just the local part, so
