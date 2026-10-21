@@ -5,8 +5,10 @@ FROM php:8.5-apache
 # --with-password-argon2), so there is nothing to install. Assert it at build
 # time instead of assuming: without curl, proxy.php cannot reach any provider;
 # without argon2, auth_hash_password() silently downgrades to bcrypt.
-RUN php -r 'exit(extension_loaded("curl") && extension_loaded("openssl") && defined("PASSWORD_ARGON2ID") ? 0 : 1);' \
- || { echo "FATAL: base image is missing curl, openssl or argon2 support"; exit 1; }
+# The version floor stops a build on a stale cached php:8.5-apache: 8.5.12 fixes
+# CVE-2026-109618/109619 (unauthenticated RCE). Raise it on each PHP security release.
+RUN php -r 'exit(PHP_VERSION_ID >= 80512 && extension_loaded("curl") && extension_loaded("openssl") && defined("PASSWORD_ARGON2ID") ? 0 : 1);' \
+ || { echo "FATAL: base image is older than PHP 8.5.12 or missing curl, openssl or argon2 support"; exit 1; }
 
 RUN a2enmod rewrite headers
 
