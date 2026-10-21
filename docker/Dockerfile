@@ -1,4 +1,6 @@
-FROM php:8.5-apache
+# ponytail: pinned because php:8.5-apache lagged behind the 8.5.12 security
+# release on Docker Hub; back to php:8.5-apache once that tag has moved.
+FROM php:8.5.12-apache
 
 # curl, openssl and argon2 are already compiled into the official image
 # (docker-library/php configures --with-curl, --with-openssl and
