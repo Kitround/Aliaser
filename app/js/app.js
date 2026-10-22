@@ -770,10 +770,16 @@ async function deleteAlias(alias){
   const acc=state.accounts.find(a=>a.id===alias.accountId);
   if(!acc)throw new Error('Account not found');
   const backup=[...state.aliases];
-  state.aliases=state.aliases.filter(a=>!(a.id===alias.id&&a.accountId===alias.accountId));
+  // By address, not id: disabled OVH/IK/Haltman entries carry no id, so an id
+  // match would hide every disabled alias of the account.
+  state.aliases=state.aliases.filter(a=>!(a.aliasAddress===alias.aliasAddress&&a.accountId===alias.accountId));
   applyFilter();render();
   try{
-    if(alias.provider==='infomaniak') await ikDeleteAlias(alias,acc);
+    // A disabled OVH/IK/Haltman alias was already deleted at the provider; it only
+    // lives in disabledAliases, so dropping that entry is the whole delete.
+    const localOnly=alias.disabled&&['ovh','infomaniak','haltman'].includes(alias.provider);
+    if(localOnly){}
+    else if(alias.provider==='infomaniak') await ikDeleteAlias(alias,acc);
     else if(alias.provider==='simplelogin') await slDeleteAlias(alias);
     else if(alias.provider==='addy') await addyDeleteAlias(alias);
     else if(alias.provider==='cloudflare') await cfDeleteAlias(alias,acc);

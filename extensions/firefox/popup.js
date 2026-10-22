@@ -653,7 +653,10 @@ async function createAlias(name, note = '') {
 // ── Delete alias ──────────────────────────────────────────────────────────────
 async function deleteAlias(alias) {
   const acc = ps.accounts.find(a => a.id === alias.accountId);
-  switch (alias.provider) {
+  // A disabled OVH/IK/Haltman alias was already deleted at the provider; it only
+  // lives in disabledAliases, so dropping that entry is the whole delete.
+  const localOnly = alias.disabled && ['ovh', 'infomaniak', 'haltman'].includes(alias.provider);
+  if (!localOnly) switch (alias.provider) {
     case 'ovh':         await ovhDeleteAlias(alias, acc);  break;
     case 'infomaniak':  await ikDeleteAlias(alias, acc);   break;
     case 'simplelogin': await slDeleteAlias(alias);        break;
@@ -661,7 +664,15 @@ async function deleteAlias(alias) {
     case 'cloudflare':  await cfDeleteAlias(alias, acc);   break;
     case 'haltman':     await haltmanDeleteAlias(alias);   break;
   }
-  ps.aliases = ps.aliases.filter(a => !(a.id === alias.id && a.accountId === alias.accountId));
+  // By address, not id: disabled entries carry no id.
+  ps.aliases = ps.aliases.filter(a => !(a.aliasAddress === alias.aliasAddress && a.accountId === alias.accountId));
+  if (localOnly) {
+    ps.disabledAliases = ps.disabledAliases.filter(d =>
+      !(d.aliasAddress === alias.aliasAddress && d.accountId === alias.accountId)
+    );
+    delete ps.aliasSeen[seenKey(alias)];
+    await saveServerState();
+  }
   delete ps.notes[alias.aliasAddress];
   applyFilter();
   renderList();
