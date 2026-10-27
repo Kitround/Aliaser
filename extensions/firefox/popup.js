@@ -91,7 +91,10 @@ async function pc(provider, method, path, body = null, extra = {}, retries = 2) 
       return data;
     } catch (e) {
       const isNet = e instanceof TypeError || e.message === 'Failed to fetch' || e.message.includes('NetworkError');
-      if (isNet && attempt < retries) { await new Promise(r => setTimeout(r, 500 * (attempt + 1))); continue; }
+      // Only retry reads. A network error means the request may well have
+      // reached the provider, so replaying a DELETE hits OVH's "not in READY
+      // status" 409 and replaying a POST creates a second alias.
+      if (isNet && attempt < retries && method === 'GET') { await new Promise(r => setTimeout(r, 500 * (attempt + 1))); continue; }
       throw e;
     }
   }
