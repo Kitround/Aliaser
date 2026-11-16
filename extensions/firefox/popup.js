@@ -15,6 +15,7 @@ const ps = {
   searchQuery:       '',
   sortKey:           'name-asc',
   aliasSeen:         {},   // { "accountId|aliasAddress": epoch ms } — shared with the dashboard
+  failedAccounts:    new Set(),   // accountIds whose last fetch failed — their aliases are the cached copy
   selectedAccountId: null,
   currentTabHost:    '',
 };
@@ -654,7 +655,7 @@ async function fetchAll() {
   // Drop aliases of accounts that no longer exist (a cache from before a removal).
   const validIds = new Set(ps.accounts.map(a => a.id));
   ps.aliases = ps.aliases.filter(a => validIds.has(a.accountId));
-  let failed = 0;
+  ps.failedAccounts.clear();
   const tasks = ps.accounts.map(acc =>
     fetchFor(acc)
       .then(list => {
@@ -672,7 +673,7 @@ async function fetchAll() {
         if (progressive) { renderList(); updateCount(); }
       })
       .catch(e => {
-        failed++;
+        ps.failedAccounts.add(acc.id);
         const lbl = labelFor[acc.provider] || acc.provider;
         showError(lbl + ' (' + acc.label + '): ' + describeProviderError(e));
       })
@@ -682,7 +683,7 @@ async function fetchAll() {
   renderList();
   updateCount();
   // Every provider failed (offline): keep the previous cache, it is still usable.
-  if (failed < ps.accounts.length) saveCachedAliases();
+  if (ps.failedAccounts.size < ps.accounts.length) saveCachedAliases();
   if (_seenDirty) await saveServerState();
 }
 
@@ -1028,7 +1029,7 @@ function renderList() {
 
     return `<div class="p-item${disabled ? ' is-disabled' : ''}" data-id="${esc(a.id)}" data-account="${esc(a.accountId)}">
       <div class="p-item-addr">
-        <div class="p-item-local">${esc(local)}<span class="p-item-domain">${esc(domain)}</span></div>
+        <div class="p-item-local">${ps.failedAccounts.has(a.accountId) ? '<span class="p-stale" title="Provider unreachable — showing the last cached copy"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>' : ''}${esc(local)}<span class="p-item-domain">${esc(domain)}</span></div>
         ${note ? `<div class="p-item-note">${esc(note)}</div>` : ''}
       </div>
       <div class="p-actions">

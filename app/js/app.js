@@ -966,6 +966,7 @@ function renderList(){
         <div class="alias-badges">
           <span class="pbadge pbadge-${providerClass}">${providerLabel}</span>
           ${a.disabled?'<span class="badge-disabled">disabled</span>':''}
+          ${state.accountErrors[a.accountId]?'<span class="badge-stale" title="Provider unreachable — showing the last cached copy"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>cached</span>':''}
           ${a.provider==='simplelogin'&&!a.disabled?`<span class="sl-stat" title="Forwarded">↓${Number(a.slNbForward)||0}</span><span class="sl-stat" title="Replied">↑${Number(a.slNbReply)||0}</span>${(a.slNbBlock||0)>0?`<span class="sl-stat sl-stat-block" title="Blocked">✕${Number(a.slNbBlock)||0}</span>`:''}`:'' }
           ${a.provider==='addy'&&!a.disabled?`<span class="addy-stat" title="Forwarded">↓${Number(a.addyNbForward)||0}</span><span class="addy-stat" title="Replied">↑${Number(a.addyNbReply)||0}</span><span class="addy-stat" title="Sent">→${Number(a.addyNbSend)||0}</span>${(a.addyNbBlock||0)>0?`<span class="addy-stat addy-stat-block" title="Blocked">✕${Number(a.addyNbBlock)||0}</span>`:''}`:''}
         </div>

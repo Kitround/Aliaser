@@ -101,6 +101,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .pbadge-haltman{background:var(--haltman-soft);color:var(--haltman)}
 /* disabled badge */
 .badge-disabled{font-size:.58rem;font-family:var(--mono);padding:1px 5px;border-radius:3px;margin-left:6px;background:rgba(128,128,128,.12);color:var(--text-dim);vertical-align:middle}
+.badge-stale{display:inline-flex;align-items:center;gap:3px;font-size:.58rem;font-family:var(--mono);padding:1px 5px;border-radius:3px;background:rgba(224,144,64,.12);color:var(--orange)}
 /* disabled card */
 .alias-card-disabled .alias-card-body{opacity:1}
 .alias-card-disabled .alias-address{color:#444}
