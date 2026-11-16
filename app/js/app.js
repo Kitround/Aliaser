@@ -676,10 +676,14 @@ function describeProviderError(e){
 }
 
 // ── Unified fetch ─────────────────────────────────────────────────────────────
-// Progressive: each provider's results are merged and rendered as soon as they
-// arrive, so a slow or failing provider doesn't block the others.
+// Progressive on an empty screen: each provider's results are merged and
+// rendered as soon as they arrive, so a slow or failing provider doesn't block
+// the others. With a list already shown (cache or earlier load) the fresh one is
+// swapped in with the single render loadAliases() does at the end — per-provider
+// repaints would reshuffle it under a date sort.
 async function fetchAliases(){
   if(!state.accounts.length)return;
+  const progressive=!state.aliases.length;
   state.dataLoaded=true;
   const fetchFor=acc=>{
     if(acc.provider==='ovh')return ovhFetchForAccount(acc);
@@ -711,7 +715,7 @@ async function fetchAliases(){
         state.aliases=next;
         stampSeen(next);
         sortAliases();
-        applyFilter();scheduleRender();
+        applyFilter();if(progressive)scheduleRender();
       })
       .catch(e=>{
         const lbl=labelFor[acc.provider]||acc.provider;
@@ -1262,7 +1266,10 @@ function loadCachedAliases(){
     state.accounts=data.accounts;
     state.aliases=data.aliases;
     if(data.notes&&typeof data.notes==='object'&&!Array.isArray(data.notes))state.notes=data.notes;
+    // Seen stamps too: without them a date sort has no date for OVH/IK/CF/Haltman.
+    if(data.aliasSeen&&typeof data.aliasSeen==='object'&&!Array.isArray(data.aliasSeen))state.aliasSeen=data.aliasSeen;
     state.dataLoaded=true;
+    sortAliases();
     applyFilter();
     return true;
   }catch{return false;}
@@ -1272,7 +1279,7 @@ function saveCachedAliases(){
     // Strip every credential field — only non-secret display data is cached.
     const accounts=state.accounts.map(({consumerKey:_ck,token:_t,ovhAppKey:_k,ovhAppSecret:_s,...rest})=>rest);
     const aliases=state.aliases.filter(a=>!a.pending);
-    localStorage.setItem(ALIAS_CACHE_KEY,JSON.stringify({accounts,aliases,notes:state.notes}));
+    localStorage.setItem(ALIAS_CACHE_KEY,JSON.stringify({accounts,aliases,notes:state.notes,aliasSeen:state.aliasSeen}));
   }catch{}
 }
 function clearCachedAliases(){

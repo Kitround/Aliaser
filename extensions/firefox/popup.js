@@ -593,11 +593,51 @@ function describeProviderError(e) {
   return msg;
 }
 
+// ── Alias cache (stale-while-revalidate) ──────────────────────────────────────
+// Same idea as the dashboard: the last list paints the moment the popup opens,
+// then the live fetch replaces it in one go. Display data only, never a token.
+// localStorage is enough — losing it costs one spinner. Tied to the server URL
+// so switching servers never shows the other one's aliases.
+const ALIAS_CACHE_KEY = 'aliaser_alias_cache_v1';
+function loadCachedAliases() {
+  try {
+    const d = JSON.parse(localStorage.getItem(ALIAS_CACHE_KEY));
+    if (!d || d.url !== getProxy() || !Array.isArray(d.accounts) || !Array.isArray(d.aliases) || !d.aliases.length) return false;
+    const isMap = v => !!v && typeof v === 'object' && !Array.isArray(v);
+    ps.accounts  = d.accounts;
+    ps.aliases   = d.aliases;
+    ps.notes     = isMap(d.notes) ? d.notes : {};
+    ps.aliasSeen = isMap(d.aliasSeen) ? d.aliasSeen : {};
+    applyFilter();
+    renderList();
+    updateCount();
+    return true;
+  } catch (e) { return false; }
+}
+function saveCachedAliases() {
+  try {
+    localStorage.setItem(ALIAS_CACHE_KEY, JSON.stringify({
+      url:       getProxy(),
+      accounts:  ps.accounts.map(({ consumerKey: _ck, token: _t, ovhAppKey: _k, ovhAppSecret: _s, ...rest }) => rest),
+      aliases:   ps.aliases.filter(a => !a.pending),
+      notes:     ps.notes,
+      aliasSeen: ps.aliasSeen,
+    }));
+  } catch (e) {}
+}
+function clearCachedAliases() {
+  try { localStorage.removeItem(ALIAS_CACHE_KEY); } catch (e) {}
+}
+
 // ── Fetch all aliases ─────────────────────────────────────────────────────────
-// Progressive: each provider's results are merged and rendered as soon as they
-// arrive, so a slow or failing provider doesn't block the others.
+// Progressive on an empty list: each provider's results are merged and rendered
+// as soon as they arrive, so a slow or failing provider doesn't block the
+// others. With a list already shown (the cache, or a refresh after a create)
+// the fresh one replaces it in a single render at the end — per-provider
+// repaints would reshuffle it under a date sort.
 async function fetchAll() {
-  setListHtml('<div class="p-state"><div class="p-spinner"></div></div>');
+  const progressive = !ps.aliases.length;
+  if (progressive) setListHtml('<div class="p-state"><div class="p-spinner"></div></div>');
   const apiProviders = new Set(['simplelogin', 'addy', 'cloudflare']);
   const labelFor     = { ovh: 'OVH', infomaniak: 'IK', simplelogin: 'SL', addy: 'Addy', cloudflare: 'CF', haltman: 'Haltman' };
   const fetchFor = acc => {
@@ -611,7 +651,10 @@ async function fetchAll() {
       default:            return Promise.resolve([]);
     }
   };
-  ps.aliases = [];
+  // Drop aliases of accounts that no longer exist (a cache from before a removal).
+  const validIds = new Set(ps.accounts.map(a => a.id));
+  ps.aliases = ps.aliases.filter(a => validIds.has(a.accountId));
+  let failed = 0;
   const tasks = ps.accounts.map(acc =>
     fetchFor(acc)
       .then(list => {
@@ -626,15 +669,20 @@ async function fetchAll() {
         ps.aliases = next;
         stampSeen(next);
         applyFilter();
-        renderList();
-        updateCount();
+        if (progressive) { renderList(); updateCount(); }
       })
       .catch(e => {
+        failed++;
         const lbl = labelFor[acc.provider] || acc.provider;
         showError(lbl + ' (' + acc.label + '): ' + describeProviderError(e));
       })
   );
   await Promise.allSettled(tasks);
+  applyFilter();
+  renderList();
+  updateCount();
+  // Every provider failed (offline): keep the previous cache, it is still usable.
+  if (failed < ps.accounts.length) saveCachedAliases();
   if (_seenDirty) await saveServerState();
 }
 
@@ -1273,11 +1321,12 @@ document.getElementById('p-confirm-delete').addEventListener('click', () => {
 async function init() {
   if (window.ALIASER_SETUP_MODE) return;
 
-  setListHtml('<div class="p-state"><div class="p-spinner"></div></div>');
+  if (!loadCachedAliases()) setListHtml('<div class="p-state"><div class="p-spinner"></div></div>');
   try {
     await loadPopupState();
 
     if (!ps.accounts.length) {
+      clearCachedAliases();
       document.getElementById('p-create-section').style.display = 'none';
       setListHtml('<div class="p-state">No accounts configured.<br>Open the dashboard to add one.</div>');
       return;
@@ -1304,6 +1353,7 @@ async function init() {
   } catch (e) {
     const url = getProxy();
     const isAuth = /authorized|device token|HTTP 401/i.test(e.message || '');
+    if (isAuth) clearCachedAliases();
     showError(isAuth ? 'Sign-in required — set a device token' : 'Cannot connect to server');
     const head = isAuth
       ? 'This server requires sign-in. Paste a device token in Options.'
