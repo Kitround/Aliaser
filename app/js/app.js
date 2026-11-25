@@ -980,17 +980,6 @@ function renderList(){
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
           </svg>
         </button>
-        ${a.disabled?`
-        <button class="icon-btn enable-btn" title="Re-enable">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <polygon points="5 3 19 12 5 21 5 3"/>
-          </svg>
-        </button>`:`
-        <button class="icon-btn disable-btn" title="Disable">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
-          </svg>
-        </button>`}
         ${(a.provider==='simplelogin'||a.provider==='addy')?`
         <button class="icon-btn contacts-btn" title="Contacts / Reverse aliases">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -1012,6 +1001,17 @@ function renderList(){
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
           </svg>
         </button>
+        ${a.disabled?`
+        <button class="icon-btn enable-btn" title="Re-enable">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+        </button>`:`
+        <button class="icon-btn disable-btn" title="Disable">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+          </svg>
+        </button>`}
       </div>
     </div>`;
   });

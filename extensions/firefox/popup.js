@@ -1011,11 +1011,11 @@ function renderList() {
     const hasContacts = isSl || a.provider === 'addy';
 
     const btnToggle = `
-      <button class="p-btn${disabled ? '' : ' toggle-on'} toggle-btn" data-id="${esc(a.id)}" title="${disabled ? 'Enable' : 'Disable'}">
-        <svg width="18" height="11" viewBox="0 0 30 18">
+      <button class="p-btn toggle-btn" data-id="${esc(a.id)}" title="${disabled ? 'Enable' : 'Disable'}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           ${disabled
-            ? `<rect width="30" height="18" rx="9" fill="currentColor" opacity=".25"/><circle cx="9" cy="9" r="7" fill="currentColor" opacity=".5"/>`
-            : `<rect width="30" height="18" rx="9" fill="currentColor" opacity=".35"/><circle cx="21" cy="9" r="7" fill="currentColor"/>`}
+            ? `<polygon points="5 3 19 12 5 21 5 3"/>`
+            : `<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>`}
         </svg>
       </button>`;
 
@@ -1041,7 +1041,6 @@ function renderList() {
           </svg>
         </button>
         ${btnContacts}
-        ${btnToggle}
         <button class="p-btn note-btn" data-id="${esc(a.id)}" title="Edit note">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -1056,6 +1055,7 @@ function renderList() {
             <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
           </svg>
         </button>
+        ${btnToggle}
       </div>
     </div>`;
   }).join(''));
