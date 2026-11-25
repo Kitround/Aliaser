@@ -641,6 +641,8 @@ function clearCachedAliases() {
 // others. With a list already shown (the cache, or a refresh after a create)
 // the fresh one replaces it in a single render at the end — per-provider
 // repaints would reshuffle it under a date sort.
+// One promise per account, settled once its fresh list is in ps.aliases.
+const _accountFetch = {};
 async function fetchAll() {
   const progressive = !ps.aliases.length;
   if (progressive) setListHtml('<div class="p-state"><div class="p-spinner"></div></div>');
@@ -661,7 +663,7 @@ async function fetchAll() {
   const validIds = new Set(ps.accounts.map(a => a.id));
   ps.aliases = ps.aliases.filter(a => validIds.has(a.accountId));
   ps.failedAccounts.clear();
-  const tasks = ps.accounts.map(acc =>
+  const tasks = ps.accounts.map(acc => _accountFetch[acc.id] =
     fetchFor(acc)
       .then(list => {
         let next = ps.aliases.filter(a => a.accountId !== acc.id);
@@ -1282,18 +1284,24 @@ document.getElementById('p-sort-menu').addEventListener('click', e => {
 document.addEventListener('click', () => document.getElementById('p-sort-menu').classList.remove('open'));
 renderSortMenu();
 
-document.getElementById('p-list').addEventListener('click', e => {
+document.getElementById('p-list').addEventListener('click', async e => {
   // Match on id AND accountId: Infomaniak alias ids are just the local part, so
   // the same name on two IK accounts would otherwise resolve to the wrong row.
   const item = e.target.closest('.p-item');
   if (!item) return;
-  const alias = ps.aliases.find(a => a.id === item.dataset.id && a.accountId === item.dataset.account);
-  if (!alias) return;
+  const shown = ps.aliases.find(a => a.id === item.dataset.id && a.accountId === item.dataset.account);
+  if (!shown) return;
 
   if (e.target.closest('.copy-btn')) {
-    navigator.clipboard?.writeText(alias.aliasAddress).catch(() => {}); showToast('Copied');
+    navigator.clipboard?.writeText(shown.aliasAddress).catch(() => {}); showToast('Copied');
     return;
   }
+  // Everything else acts on the provider, so wait for this account's fresh list
+  // and use that copy: the cached one can be out of date (an OVH alias
+  // re-enabled from the dashboard comes back under a new id).
+  await _accountFetch[shown.accountId];
+  const alias = ps.aliases.find(a => a.aliasAddress === shown.aliasAddress && a.accountId === shown.accountId);
+  if (!alias) return;
   if (e.target.closest('.contacts-btn')) { openContacts(alias); return; }
   if (e.target.closest('.toggle-btn')) {
     toggleAlias(alias).catch(err => showError('Toggle failed: ' + err.message));
@@ -1396,6 +1404,8 @@ async function init() {
     const nameWrap   = document.getElementById('p-name-wrap');
     if (nameWrap) nameWrap.style.display = isAddyFree ? 'none' : '';
 
+    // Before the SL options: a slow SimpleLogin must not hold back every list.
+    fetchAll();
     if (def.provider === 'simplelogin') {
       try {
         await loadSlOptions(def);
@@ -1405,7 +1415,6 @@ async function init() {
     }
 
     fillFromTab();
-    fetchAll();
   } catch (e) {
     const isAuth = /authorized|device token|HTTP 401/i.test(e.message || '');
     if (isAuth) clearCachedAliases();
