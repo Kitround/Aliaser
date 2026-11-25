@@ -632,13 +632,19 @@ function clearCachedAliases() {
 }
 
 // ── Fetch all aliases ─────────────────────────────────────────────────────────
+// A card action must not run on the cached copy (see the p-list click handler).
+// _listsStarted settles once fetchAll() has been called, or once init() gave up;
+// _accountFetch then holds one promise per account, settled once that account's
+// fresh list is in ps.aliases (or its fetch failed).
+const _accountFetch = {};
+let _markListsStarted;
+const _listsStarted = new Promise(r => { _markListsStarted = r; });
+
 // Progressive on an empty list: each provider's results are merged and rendered
 // as soon as they arrive, so a slow or failing provider doesn't block the
 // others. With a list already shown (the cache, or a refresh after a create)
 // the fresh one replaces it in a single render at the end — per-provider
 // repaints would reshuffle it under a date sort.
-// One promise per account, settled once its fresh list is in ps.aliases.
-const _accountFetch = {};
 async function fetchAll() {
   const progressive = !ps.aliases.length;
   if (progressive) setListHtml('<div class="p-state"><div class="p-spinner"></div></div>');
@@ -681,6 +687,7 @@ async function fetchAll() {
         showError(lbl + ' (' + acc.label + '): ' + describeProviderError(e));
       })
   );
+  _markListsStarted();
   await Promise.allSettled(tasks);
   applyFilter();
   renderList();
@@ -1030,7 +1037,7 @@ function renderList() {
         </svg>
       </button>` : '';
 
-    return `<div class="p-item${disabled ? ' is-disabled' : ''}" data-id="${esc(a.id)}" data-account="${esc(a.accountId)}">
+    return `<div class="p-item${disabled ? ' is-disabled' : ''}" data-id="${esc(a.id)}" data-account="${esc(a.accountId)}" data-address="${esc(a.aliasAddress)}">
       <div class="p-item-addr">
         <div class="p-item-local">${ps.failedAccounts.has(a.accountId) ? '<span class="p-stale" title="Provider unreachable — showing the last cached copy"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>' : ''}${esc(local)}<span class="p-item-domain">${esc(domain)}</span></div>
         ${note ? `<div class="p-item-note">${esc(note)}</div>` : ''}
@@ -1278,11 +1285,14 @@ document.addEventListener('click', () => document.getElementById('p-sort-menu').
 renderSortMenu();
 
 document.getElementById('p-list').addEventListener('click', async e => {
-  // Match on id AND accountId: Infomaniak alias ids are just the local part, so
-  // the same name on two IK accounts would otherwise resolve to the wrong row.
+  // Match on address AND accountId, not id: a disabled OVH/IK/Haltman entry
+  // written without an id would never match, and Infomaniak ids are just the
+  // local part, so the same name on two IK accounts would hit the wrong row.
   const item = e.target.closest('.p-item');
   if (!item) return;
-  const shown = ps.aliases.find(a => a.id === item.dataset.id && a.accountId === item.dataset.account);
+  const { address, account } = item.dataset;
+  const find  = () => ps.aliases.find(a => a.aliasAddress === address && a.accountId === account);
+  const shown = find();
   if (!shown) return;
 
   if (e.target.closest('.copy-btn')) {
@@ -1291,9 +1301,11 @@ document.getElementById('p-list').addEventListener('click', async e => {
   }
   // Everything else acts on the provider, so wait for this account's fresh list
   // and use that copy: the cached one can be out of date (an OVH alias
-  // re-enabled from the dashboard comes back under a new id).
-  await _accountFetch[shown.accountId];
-  const alias = ps.aliases.find(a => a.aliasAddress === shown.aliasAddress && a.accountId === shown.accountId);
+  // re-enabled from the dashboard comes back under a new id), and before
+  // loadPopupState() its account has no OVH consumer key.
+  await _listsStarted;
+  await _accountFetch[account];
+  const alias = find();
   if (!alias) return;
   if (e.target.closest('.contacts-btn')) { openContacts(alias); return; }
   if (e.target.closest('.toggle-btn')) {
@@ -1424,6 +1436,8 @@ async function init() {
       '</div>'
     );
     document.getElementById('p-open-options')?.addEventListener('click', () => browser.runtime.openOptionsPage());
+  } finally {
+    _markListsStarted(); // no refresh coming: never leave a card click waiting
   }
 }
 

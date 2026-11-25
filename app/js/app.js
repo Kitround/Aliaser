@@ -677,6 +677,14 @@ function describeProviderError(e){
 }
 
 // ── Unified fetch ─────────────────────────────────────────────────────────────
+// A card action must not run on the cached copy (see the alias-list click
+// handler). _listsStarted settles once fetchAliases() has been called, or once
+// boot gave up; _accountFetch then holds one promise per account, settled once
+// that account's fresh list is in state.aliases (or its fetch failed).
+const _accountFetch={};
+let _markListsStarted;
+const _listsStarted=new Promise(r=>{_markListsStarted=r;});
+
 // Progressive on an empty screen: each provider's results are merged and
 // rendered as soon as they arrive, so a slow or failing provider doesn't block
 // the others. With a list already shown (cache or earlier load) the fresh one is
@@ -699,7 +707,7 @@ async function fetchAliases(){
   // Drop aliases for accounts no longer in state.accounts
   const validIds=new Set(state.accounts.map(a=>a.id));
   state.aliases=state.aliases.filter(a=>validIds.has(a.accountId));
-  const tasks=state.accounts.map(acc=>
+  const tasks=state.accounts.map(acc=>_accountFetch[acc.id]=
     fetchFor(acc)
       .then(list=>{
         delete state.accountErrors[acc.id];
@@ -726,6 +734,7 @@ async function fetchAliases(){
         showError(lbl+' ('+acc.label+'): '+friendly);
       })
   );
+  _markListsStarted();
   await Promise.allSettled(tasks);
   if(_seenDirty)await saveServerState();
 }
@@ -956,7 +965,7 @@ function renderList(){
       a.provider==='cloudflare'?'Cloudflare':
       a.provider==='haltman'?'Haltman':'OVH';
     html+=`
-    <div class="alias-card${a.disabled?' alias-card-disabled':''}" data-id="${esc(a.id)}" data-account="${esc(a.accountId)}" style="${a.pending?'opacity:.5;pointer-events:none':''}">
+    <div class="alias-card${a.disabled?' alias-card-disabled':''}" data-id="${esc(a.id)}" data-account="${esc(a.accountId)}" data-address="${esc(a.aliasAddress)}" style="${a.pending?'opacity:.5;pointer-events:none':''}">
       <div class="alias-card-body">
         <div class="alias-address">${(s=>{const i=s.indexOf('@');return i<0?esc(s):esc(s.slice(0,i))+'<span class="alias-domain">'+esc(s.slice(i))+'</span>'})(a.aliasAddress)}</div>
         <div class="alias-target">
@@ -2066,22 +2075,33 @@ document.querySelector('.content-scroll')?.addEventListener('scroll',()=>{
 },{passive:true});
 
 // ── Alias list clicks ─────────────────────────────────────────────────────────
-document.getElementById('alias-list').addEventListener('click',e=>{
+document.getElementById('alias-list').addEventListener('click',async e=>{
   if(_isScrolling)return;
   const now=Date.now();
   if(now-_lastTapTime<350){return;}
   _lastTapTime=now;
   const card=e.target.closest('.alias-card');if(!card)return;
-  const id=card.dataset.id,accountId=card.dataset.account;
-  const alias=state.aliases.find(a=>a.id===id&&a.accountId===accountId);if(!alias)return;
-  if(e.target.closest('.delete-btn')){e.stopPropagation();showConfirm(alias);return;}
-  if(e.target.closest('.edit-note-btn')){e.stopPropagation();openEditNote(alias);return;}
-  if(e.target.closest('.contacts-btn')){e.stopPropagation();openContactsModal(alias);return;}
-  if(e.target.closest('.disable-btn')){e.stopPropagation();
+  // Address + account, not id: a disabled OVH/IK/Haltman entry written without
+  // an id would never match, and IK ids repeat across accounts.
+  const accountId=card.dataset.account,address=card.dataset.address;
+  const shown=state.aliases.find(a=>a.aliasAddress===address&&a.accountId===accountId);if(!shown)return;
+  if(e.target.closest('.copy-btn')){copyText(shown.aliasAddress,card);return;}
+  if(!e.target.closest('.delete-btn,.edit-note-btn,.contacts-btn,.disable-btn,.enable-btn'))return;
+  e.stopPropagation();
+  // Everything else acts on the provider, so wait for this account's fresh list
+  // and use that copy: the cached one can be out of date (an OVH alias
+  // re-enabled from a popup comes back under a new id), and before
+  // loadServerState() its account has no OVH consumer key.
+  await _listsStarted;
+  await _accountFetch[accountId];
+  const alias=state.aliases.find(a=>a.aliasAddress===address&&a.accountId===accountId);if(!alias)return;
+  if(e.target.closest('.delete-btn')){showConfirm(alias);return;}
+  if(e.target.closest('.edit-note-btn')){openEditNote(alias);return;}
+  if(e.target.closest('.contacts-btn')){openContactsModal(alias);return;}
+  if(e.target.closest('.disable-btn')){
     disableAlias(alias).catch(e=>showError('Failed to disable: '+e.message));return;}
-  if(e.target.closest('.enable-btn')){e.stopPropagation();
+  if(e.target.closest('.enable-btn')){
     enableAlias(alias).catch(e=>showError('Failed to re-enable: '+e.message));return;}
-  if(e.target.closest('.copy-btn'))copyText(alias.aliasAddress,card);
 });
 
 // ── SL Contacts modal ────────────────────────────────────────────────────────
@@ -2359,4 +2379,5 @@ loadCsrf().then(()=>Promise.all([loadServerState(),loadNotes(),loadCredentials()
     render();
     clearCachedAliases();
   }
-}).catch(()=>{state.isLoading=false;render();});
+}).catch(()=>{state.isLoading=false;render();})
+  .finally(()=>_markListsStarted()); // no refresh coming: never leave a card click waiting
