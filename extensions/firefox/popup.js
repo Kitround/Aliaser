@@ -147,13 +147,34 @@ async function postStore(store, patch, what) {
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(patch),
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) throw await storeError(res);
     return true;
   } catch (e) {
     console.error('Failed to save ' + what + ':', e);
     showError(what[0].toUpperCase() + what.slice(1) + ' not saved: ' + e.message);
     return false;
   }
+}
+
+// An Aliaser server older than the -patch routes hands them to the provider
+// proxy, which answers 400 "Invalid request fields": say what to do about it.
+async function storeError(res) {
+  const body = await res.json().catch(() => null);
+  return new Error(res.status === 400 && body?.error === 'Invalid request fields'
+    ? 'the Aliaser server is older than this extension, redeploy it'
+    : 'HTTP ' + res.status);
+}
+
+// Disabling an OVH/IK/Haltman alias deletes it at the provider and keeps it
+// only as a state.json entry: on a server that cannot record that entry, the
+// alias would be gone for good. Asked once per popup: an empty patch is a no-op
+// on a current server and a 400 on an older one. A failure is not cached.
+let _patchRoutes = null;
+function checkPatchRoutes() {
+  return _patchRoutes ??= fetch(getProxy() + '?action=state-patch', {
+    method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: '{}',
+  }).then(async res => { if (!res.ok) throw await storeError(res); })
+    .catch(e => { _patchRoutes = null; throw e; });
 }
 
 // {address: text, or null to delete}
@@ -787,6 +808,7 @@ async function toggleAlias(alias) {
         case 'ovh':
         case 'infomaniak':
         case 'haltman': {
+          await checkPatchRoutes(); // before the delete: the server must be able to record it
           if      (alias.provider === 'infomaniak') await ikDeleteAlias(alias, acc);
           else if (alias.provider === 'haltman')    await haltmanDeleteAlias(alias);
           else                                      await ovhDeleteAlias(alias, acc);
