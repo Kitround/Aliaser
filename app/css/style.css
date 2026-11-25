@@ -295,6 +295,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .btn-row-wrap{flex-wrap:wrap}
 /* Field hint */
 .field-hint-text{font-size:.65rem;color:var(--text-dim);line-height:1.5}
+#app-version{margin-top:14px}
 .field-error{font-size:.7rem;color:var(--red);margin-top:4px}
 /* Edit account form */
 #section-edit-account .status-badge,#section-add-ovh .status-badge{padding:2px 0}
