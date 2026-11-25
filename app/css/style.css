@@ -245,6 +245,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
   .alias-actions{display:grid;grid-template-columns:repeat(2,30px);gap:2px}
   .alias-actions .icon-btn{width:30px;height:30px;border:none;background:transparent !important;border-radius:0}
   .alias-actions .icon-btn svg{width:17px;height:17px}
+  /* SL/Addy cards have 5 buttons: keep pause/play in the right column. */
+  .alias-actions .disable-btn,.alias-actions .enable-btn{grid-column:2}
   .field-input,.search-input{font-size:16px}
   /* Same field as the topbar one, just laid out full width under the topbar.
      Slower than --t on the focus ring so it fades in and out. */
