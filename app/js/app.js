@@ -45,6 +45,9 @@ async function loadCsrf(){
 async function loadServerState(){
   try{
     const res=_checkAuth(await fetch(PROXY+'?action=state',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}}));
+    // A 5xx body parses as JSON too: without this it read as "no accounts" and
+    // wiped the cached list.
+    if(!res.ok)throw new Error('HTTP '+res.status);
     const data=await res.json();
     state.accounts=data.accounts||[];
     state.ovhZimbraPlatformIds=data.zimbraPlatformIds||{};
@@ -65,30 +68,54 @@ async function loadServerState(){
     if(!state.accounts.length)state.accounts=[];
   }
 }
+// Picks up what a popup saved since this tab loaded: disabled aliases, dates,
+// platform ids, notes, Addy contacts. Accounts stay as they are: this tab
+// manages them and may hold edits the server has not seen yet.
+async function reloadShared(){
+  try{
+    const res=_checkAuth(await fetch(PROXY+'?action=state',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}}));
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const d=await res.json();
+    if(Array.isArray(d.disabledAliases))state.disabledAliases=d.disabledAliases;
+    if(d.aliasSeen&&typeof d.aliasSeen==='object'&&!Array.isArray(d.aliasSeen))state.aliasSeen={...d.aliasSeen,..._seenNew};
+    if(d.zimbraPlatformIds&&typeof d.zimbraPlatformIds==='object')Object.assign(state.ovhZimbraPlatformIds,d.zimbraPlatformIds);
+  }catch(e){console.error('Failed to reload shared state:',e);}
+  await Promise.all([loadNotes(),loadAddyContacts()]);
+}
 
-async function saveServerState(){
-  // Only OVH/IK store disabled state — API-driven providers (SL, Addy, CF) do not
-  const apiProviders=new Set(['simplelogin','addy','cloudflare']);
-  const liveDisabled=state.aliases
-    .filter(a=>a.disabled&&!a.pending&&!apiProviders.has(a.provider))
-    .map(({pending:_,...rest})=>rest);
-  const notYetLoaded=state.disabledAliases.filter(d=>
-    !state.aliases.some(a=>a.aliasAddress===d.aliasAddress&&a.accountId===d.accountId)
-  );
-  const allDisabled=[...liveDisabled,...notYetLoaded];
-  state.disabledAliases=allDisabled;
-  const payload={
+// The JSON stores are shared with the popups, so this tab never sends its whole
+// copy of one: a popup's disabled alias, date or note saved meanwhile would be
+// erased. Writes go to ?action=<store>-patch with only what changed, applied
+// by the server to the file as it is now (applyStatePatch() / patchMap() in
+// proxy.php). Resolves false after showing the error.
+async function postStore(action,body,what){
+  try{
+    const res=_checkAuth(await fetch(PROXY+'?action='+action,{method:'POST',headers:_writeHeaders(),body:JSON.stringify(body)}));
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    return true;
+  }catch(e){
+    console.error('Failed to save '+what+':',e);
+    showError('Could not save '+what+': '+e.message);
+    return false;
+  }
+}
+// The account list and OVH consumer keys, which only this tab manages. The
+// server merges top-level keys, so the keys not sent here are left as stored.
+function saveServerState(){
+  return postStore('state',{
     accounts:state.accounts.map(({consumerKey:_ck,token:_t,ovhAppKey:_k,ovhAppSecret:_s,...rest})=>rest),
     consumerKeys:state.accounts.filter(a=>a.consumerKey).map(a=>({id:a.id,key:a.consumerKey})),
-    zimbraPlatformIds:state.ovhZimbraPlatformIds||{},
-    zimbraPlatformId:'',
-    disabledAliases:allDisabled,
-    aliasSeen:state.aliasSeen,
-  };
-  try{
-    _checkAuth(await fetch(PROXY+'?action=state',{method:'POST',headers:_writeHeaders(),body:JSON.stringify(payload)}));
-    _seenDirty=false;
-  }catch(e){console.error('Failed to save server state:',e);}
+  },'accounts');
+}
+// Disabled aliases, dates, platform ids, account flags: only what changed.
+function patchState(patch){return postStore('state-patch',patch,'state');}
+// First sightings recorded by stampSeen(), sent in one patch per refresh. Put
+// back on failure so the next flush retries them.
+async function saveSeen(){
+  const seen=_seenNew;
+  if(!Object.keys(seen).length)return;
+  _seenNew={};
+  if(!await patchState({seen}))_seenNew={...seen,..._seenNew};
 }
 
 
@@ -97,27 +124,27 @@ async function loadNotes(){
   try{
     const res=_checkAuth(await fetch(PROXY+'?action=notes',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}}));
     const data=await res.json();
+    if(!res.ok)throw new Error('HTTP '+res.status);
     state.notes=(data&&!Array.isArray(data))?data:{};
-  }catch(e){console.error('Failed to load notes:',e);state.notes={};}
+  }catch(e){console.error('Failed to load notes:',e);} // keep the cached notes on screen
 }
-async function saveNotes(notes){
-  try{
-    _checkAuth(await fetch(PROXY+'?action=notes',{method:'POST',headers:_writeHeaders(),body:JSON.stringify(notes||state.notes)}));
-  }catch(e){console.error('Failed to save notes:',e);}
-}
+// Only the notes that changed: {address: text, or null to delete}. Another
+// client's notes survive, and a failed load here can no longer wipe the file.
+function saveNotes(patch){return postStore('notes-patch',patch,'the note');}
 
 // ── Addy contacts persistence ─────────────────────────────────────────────────
 async function loadAddyContacts(){
   try{
     const res=_checkAuth(await fetch(PROXY+'?action=addy-contacts',{headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}}));
     const data=await res.json();
+    if(!res.ok)throw new Error('HTTP '+res.status);
     state.addyContacts=(data&&typeof data==='object'&&!Array.isArray(data))?data:{};
-  }catch(e){console.error('Failed to load addy contacts:',e);state.addyContacts={};}
+  }catch(e){console.error('Failed to load addy contacts:',e);}
 }
-async function saveAddyContacts(){
-  try{
-    _checkAuth(await fetch(PROXY+'?action=addy-contacts',{method:'POST',headers:_writeHeaders(),body:JSON.stringify(state.addyContacts)}));
-  }catch(e){console.error('Failed to save addy contacts:',e);}
+// One alias's contact list (null once empty), merged server-side like notes.
+function saveAddyContacts(aliasId){
+  const list=state.addyContacts[aliasId];
+  return postStore('addy-contacts-patch',{[aliasId]:list&&list.length?list:null},'contacts');
 }
 function addyBuildReverseAddress(aliasEmail,recipientEmail){
   const at=aliasEmail.indexOf('@');
@@ -204,7 +231,7 @@ async function ovhCall(acc,method,path,body=null){
     return await proxyCall('ovh',method,path,body,{consumerKey,useV2,accountId:acc?.id||'',appKey:acc?.ovhAppKey||'',appSecret:acc?.ovhAppSecret||''});
   }catch(e){
     if(e.message&&(e.message.includes('not been granted')||e.message.includes('NOT_GRANTED')||e.message.includes('INVALID_CREDENTIAL'))){
-      if(acc){acc.consumerKey='';await saveServerState();}
+      if(acc){acc.consumerKey='';await patchState({consumerKeyUnset:[acc.id]});}
       throw new Error('OVH session expired — please re-authenticate in Settings.');
     }
     throw e;
@@ -234,7 +261,7 @@ async function getZimbraPlatform(acc){
   const p=Array.isArray(raw)?raw:(raw?.items||[]);
   if(!p[0]?.id)throw new Error('No Zimbra platform found');
   state.ovhZimbraPlatformIds[acc.id]=p[0].id;
-  await saveServerState();
+  await patchState({zimbraPlatformIds:{[acc.id]:p[0].id}});
   return state.ovhZimbraPlatformIds[acc.id];
 }
 
@@ -358,7 +385,9 @@ async function slFetchForAccount(acc){
         slLatestActivity:a.latest_activity||null,
         createdAt:toEpoch(a.creation_timestamp||a.creation_date),
       });
+      // SimpleLogin holds the note: one cleared there must clear here too.
       if(a.note&&a.note.trim())state.notes[a.email]=a.note.trim();
+      else delete state.notes[a.email];
     });
     if(items.length<20)break;
     page++;
@@ -383,7 +412,7 @@ async function slGetOptions(acc){
   }
   if(needsPremiumCheck&&userInfo){
     acc.isPremium=!!(userInfo.is_premium);
-    saveServerState();
+    patchState({accountSet:{[acc.id]:{isPremium:acc.isPremium}}});
   }
   state.slSuffixes[acc.id]={suffixes,prefixSuggestion,mailboxId};
   return state.slSuffixes[acc.id];
@@ -466,7 +495,7 @@ async function addyFetchForAccount(acc){
       const sub=info.subscription;
       const endsAt=info.subscription_ends_at;
       const isFree=!sub||sub==='free'||(endsAt&&new Date(endsAt)<new Date());
-      if(acc.isFree!==!!isFree){acc.isFree=!!isFree;saveServerState();}
+      if(acc.isFree!==!!isFree){acc.isFree=!!isFree;patchState({accountSet:{[acc.id]:{isFree:acc.isFree}}});}
     }
   }catch(_){}
   const aliases=[];
@@ -492,7 +521,9 @@ async function addyFetchForAccount(acc){
         addyNbBlock:a.emails_blocked||0,
         createdAt:toEpoch(a.created_at),
       });
+      // Addy holds the note: one cleared there must clear here too.
       if(a.description&&a.description.trim())state.notes[a.email]=a.description.trim();
+      else delete state.notes[a.email];
     });
     const lastPage=data?.meta?.last_page||1;
     if(page>=lastPage)break;
@@ -682,6 +713,7 @@ function describeProviderError(e){
 // boot gave up; _accountFetch then holds one promise per account, settled once
 // that account's fresh list is in state.aliases (or its fetch failed).
 const _accountFetch={};
+const _cardWaiting=new Set(); // "accountId|address" of cards whose click is waiting
 let _markListsStarted;
 const _listsStarted=new Promise(r=>{_markListsStarted=r;});
 
@@ -736,7 +768,7 @@ async function fetchAliases(){
   );
   _markListsStarted();
   await Promise.allSettled(tasks);
-  if(_seenDirty)await saveServerState();
+  await saveSeen();
 }
 
 async function createAlias(aliasName,accountId,note=''){
@@ -769,8 +801,8 @@ async function createAlias(aliasName,accountId,note=''){
     else state.aliases.unshift(newAlias);
     stampSeen([newAlias]);
     sortAliases();
-    if(note.trim()){state.notes[newAlias.aliasAddress]=note.trim();await saveNotes();}
-    await saveServerState();
+    if(note.trim()){state.notes[newAlias.aliasAddress]=note.trim();await saveNotes({[newAlias.aliasAddress]:note.trim()});}
+    await saveSeen();
     applyFilter();render();
     return newAlias;
   }catch(e){
@@ -799,12 +831,16 @@ async function deleteAlias(alias){
     else if(alias.provider==='cloudflare') await cfDeleteAlias(alias,acc);
     else if(alias.provider==='haltman') await haltmanDeleteAlias(alias);
     else await ovhDeleteAlias(alias,acc);
-    if(state.notes[alias.aliasAddress]){delete state.notes[alias.aliasAddress];await saveNotes();}
+    // Unconditional: a popup may have saved a note this tab never loaded.
+    delete state.notes[alias.aliasAddress];
+    await saveNotes({[alias.aliasAddress]:null});
+    if(alias.provider==='addy'&&state.addyContacts[alias.id]){delete state.addyContacts[alias.id];saveAddyContacts(alias.id);}
     state.disabledAliases=state.disabledAliases.filter(d=>!(d.aliasAddress===alias.aliasAddress&&d.accountId===alias.accountId));
     // Recreating the same address later must count as a new alias, not resurrect
     // the old date.
     delete state.aliasSeen[seenKey(alias)];
-    await saveServerState();
+    delete _seenNew[seenKey(alias)];
+    await patchState({disabledUnset:[{accountId:alias.accountId,aliasAddress:alias.aliasAddress}],seenUnset:[seenKey(alias)]});
   }catch(e){
     state.aliases=backup;
     applyFilter();render();
@@ -836,9 +872,10 @@ async function disableAlias(alias){
     // Only OVH/IK/Haltman store disabled state locally
     if(alias.provider!=='simplelogin'&&alias.provider!=='addy'&&alias.provider!=='cloudflare'){
       const{id:_,pending:__,...rest}=alias;
+      const entry={...rest,disabled:true};
       if(!state.disabledAliases.some(d=>d.aliasAddress===rest.aliasAddress&&d.accountId===rest.accountId))
-        state.disabledAliases.push({...rest,disabled:true});
-      await saveServerState();
+        state.disabledAliases.push(entry);
+      await patchState({disabledSet:[entry]});
     }
   }catch(e){
     state.aliases=backup;
@@ -872,7 +909,7 @@ async function enableAlias(alias){
       state.disabledAliases=state.disabledAliases.filter(d=>!(d.aliasAddress===alias.aliasAddress&&d.accountId===alias.accountId));
       const i=state.aliases.findIndex(a=>a.aliasAddress===alias.aliasAddress&&a.accountId===alias.accountId);
       if(i!==-1)state.aliases[i]=newAlias;
-      await saveServerState();
+      await patchState({disabledUnset:[{accountId:alias.accountId,aliasAddress:alias.aliasAddress}]});
     }
     applyFilter();render();
   }catch(e){
@@ -921,13 +958,13 @@ function groupOf(a){
   // would throw and blank the whole list.
   return (a.aliasAddress||'?')[0].toUpperCase();
 }
-// Stamps every alias we have never seen before. Sets the dirty flag instead of
+// Stamps every alias we have never seen before. Queues the new stamps instead of
 // saving: a refresh calls this once per provider, one write at the end is enough.
-let _seenDirty=false;
+let _seenNew={};
 function stampSeen(list){
   list.forEach(a=>{
     const k=seenKey(a);
-    if(!state.aliasSeen[k]){state.aliasSeen[k]=a.createdAt||Date.now();_seenDirty=true;}
+    if(!state.aliasSeen[k]){state.aliasSeen[k]=a.createdAt||Date.now();_seenNew[k]=state.aliasSeen[k];}
   });
 }
 try{const s=localStorage.getItem(SORT_LS_KEY);if(s&&SORTS[s])state.sortKey=s;}catch{}
@@ -1101,17 +1138,21 @@ function removeAccount(id){
     ...state.disabledAliases.filter(a=>a.accountId===id),
   ];
   toClean.forEach(a=>delete state.notes[a.aliasAddress]);
-  if(toClean.length)saveNotes();
+  if(toClean.length)saveNotes(Object.fromEntries(toClean.map(a=>[a.aliasAddress,null])));
+  toClean.filter(a=>a.provider==='addy'&&state.addyContacts[a.id]).forEach(a=>{delete state.addyContacts[a.id];saveAddyContacts(a.id);});
   state.accounts=state.accounts.filter(a=>a.id!==id);
   state.aliases=state.aliases.filter(a=>a.accountId!==id);
   state.filteredAliases=state.filteredAliases.filter(a=>a.accountId!==id);
   state.disabledAliases=state.disabledAliases.filter(a=>a.accountId!==id);
   Object.keys(state.aliasSeen).forEach(k=>{if(k.startsWith(id+'|'))delete state.aliasSeen[k];});
+  Object.keys(_seenNew).forEach(k=>{if(k.startsWith(id+'|'))delete _seenNew[k];});
   delete state.ovhZimbraPlatformIds[id];
   delete state.ovhZimbraAccountIds[id];
   delete state.accountErrors[id];
   if(state.credentials&&state.credentials.perAccount)delete state.credentials.perAccount[id];
   saveServerState();
+  // Also clears what a popup recorded for the account that this tab never saw.
+  patchState({dropAccounts:[id]});
   saveAccountCredentials();
   if(state.accounts.length)saveCachedAliases();else clearCachedAliases();
   renderAccountList();
@@ -1122,7 +1163,13 @@ document.getElementById('account-list').addEventListener('click',e=>{
   const warnBtn=e.target.closest('.account-warn');
   if(warnBtn){const id=warnBtn.dataset.accountId;const msg=state.accountErrors[id];if(msg)showError(msg);return;}
   const removeBtn=e.target.closest('.remove-account-btn');
-  if(removeBtn){const id=removeBtn.dataset.accountId;if(id)removeAccount(id);return;}
+  if(removeBtn){
+    const id=removeBtn.dataset.accountId;
+    const acc=state.accounts.find(a=>a.id===id);
+    // Irreversible: the stored token or OVH keys are erased with the account.
+    if(acc&&confirm('Remove "'+acc.label+'"? Its stored API credentials are deleted and have to be entered again to add it back. Its aliases at the provider are not touched.'))removeAccount(id);
+    return;
+  }
   const defaultBtn=e.target.closest('.default-btn');
   if(defaultBtn){
     const id=defaultBtn.dataset.accountId;
@@ -1297,11 +1344,12 @@ function clearCachedAliases(){
   try{localStorage.removeItem(ALIAS_CACHE_KEY);}catch{}
 }
 
-async function loadAliases(){
+// reload: the refresh button also re-reads what popups may have saved.
+async function loadAliases(reload){
   if(!canAddAlias())return;
   state.isLoading=true;
   setRefreshSpin(true);hideError();
-  try{await fetchAliases()}catch(e){showError(e.message)}
+  try{if(reload)await reloadShared();await fetchAliases()}catch(e){showError(e.message)}
   finally{
     state.isLoading=false;setRefreshSpin(false);render();
     // Persist for instant load next time — but keep the previous cache if every
@@ -2092,8 +2140,13 @@ document.getElementById('alias-list').addEventListener('click',async e=>{
   // and use that copy: the cached one can be out of date (an OVH alias
   // re-enabled from a popup comes back under a new id), and before
   // loadServerState() its account has no OVH consumer key.
-  await _listsStarted;
-  await _accountFetch[accountId];
+  // One click per card while it waits: a second one would queue and fire too,
+  // and two SimpleLogin toggles cancel out. The dimmed card says it is coming.
+  const key=accountId+'|'+address;
+  if(_cardWaiting.has(key))return;
+  _cardWaiting.add(key);card.style.opacity='.5';
+  try{await _listsStarted;await _accountFetch[accountId];}
+  finally{_cardWaiting.delete(key);card.style.opacity='';}
   const alias=state.aliases.find(a=>a.aliasAddress===address&&a.accountId===accountId);if(!alias)return;
   if(e.target.closest('.delete-btn')){showConfirm(alias);return;}
   if(e.target.closest('.edit-note-btn')){openEditNote(alias);return;}
@@ -2200,7 +2253,7 @@ document.getElementById('modal-sl-contacts').addEventListener('click',e=>{
     if(!email||!_contactsAlias)return;
     const list=state.addyContacts[_contactsAlias.id]||[];
     state.addyContacts[_contactsAlias.id]=list.filter(c=>c.email!==email);
-    saveAddyContacts();
+    saveAddyContacts(_contactsAlias.id);
     _renderContactsList(state.addyContacts[_contactsAlias.id]);
   }
   const blockBtn=e.target.closest('.block-contact-btn');
@@ -2236,7 +2289,7 @@ document.getElementById('btn-create-contact').addEventListener('click',async()=>
       }
       const reverse=addyBuildReverseAddress(_contactsAlias.aliasAddress,email);
       state.addyContacts[_contactsAlias.id].push({email,reverse});
-      await saveAddyContacts();
+      await saveAddyContacts(_contactsAlias.id);
       document.getElementById('contacts-new-email').value='';
       _renderContactsList(state.addyContacts[_contactsAlias.id]);
       copyText(reverse);
@@ -2277,13 +2330,16 @@ document.getElementById('btn-save-note').addEventListener('click',async()=>{
   const addr=_editNoteAlias.aliasAddress;
   if(note)state.notes[addr]=note;
   else delete state.notes[addr];
+  // SL/Addy hold the note, and the next refresh reads it back from them: a
+  // failed sync must be visible, or the edit silently reverts.
+  const syncFail=e=>showError('Note not saved on the provider: '+e.message);
   if(_editNoteAlias.provider==='simplelogin')
-    slUpdateNote(_editNoteAlias,note).catch(()=>{});
+    slUpdateNote(_editNoteAlias,note).catch(syncFail);
   else if(_editNoteAlias.provider==='addy')
-    addyUpdateNote(_editNoteAlias,note).catch(()=>{});
+    addyUpdateNote(_editNoteAlias,note).catch(syncFail);
   closeEditNote();
   applyFilter();render();
-  await saveNotes();
+  await saveNotes({[addr]:note||null});
 });
 
 // ── Confirm delete ────────────────────────────────────────────────────────────
@@ -2305,7 +2361,7 @@ document.getElementById('confirm-overlay').addEventListener('click',e=>{
 });
 
 // ── Refresh ───────────────────────────────────────────────────────────────────
-['btn-refresh','mob-refresh'].forEach(id=>document.getElementById(id)?.addEventListener('click',()=>{if(canAddAlias())loadAliases();}));
+['btn-refresh','mob-refresh'].forEach(id=>document.getElementById(id)?.addEventListener('click',()=>{if(canAddAlias())loadAliases(true);}));
 
 // ── Search ────────────────────────────────────────────────────────────────────
 document.getElementById('search-clear').addEventListener('click',()=>{

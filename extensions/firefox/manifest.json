@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Aliaser",
-  "version": "1.2.8",
+  "version": "1.2.9",
   "description": "Manage your email aliases",
   "browser_specific_settings": {
     "gecko": {

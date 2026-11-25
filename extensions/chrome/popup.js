@@ -116,19 +116,20 @@ async function loadPopupState() {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
-  // Notes and contacts are decoration; a failure must not blank the popup.
+  // Notes and contacts are decoration; a failure must not blank the popup, and
+  // keeps what the cache painted (writes are patches, so nothing gets wiped).
   const [sd, nd, ad] = await Promise.all([
     safeFetch(proxy + '?action=state'),
-    safeFetch(proxy + '?action=notes').catch(() => ({})),
-    safeFetch(proxy + '?action=addy-contacts').catch(() => ({})),
+    safeFetch(proxy + '?action=notes').catch(() => null),
+    safeFetch(proxy + '?action=addy-contacts').catch(() => null),
   ]);
 
   ps.accounts          = sd.accounts || [];
-  ps.notes             = (nd && !Array.isArray(nd)) ? nd : {};
+  if (nd && typeof nd === 'object' && !Array.isArray(nd)) ps.notes = nd;
   ps.zimbraPlatformIds = sd.zimbraPlatformIds || {};
   ps.disabledAliases   = sd.disabledAliases || [];
   ps.aliasSeen         = (sd.aliasSeen && typeof sd.aliasSeen === 'object' && !Array.isArray(sd.aliasSeen)) ? sd.aliasSeen : {};
-  ps.addyContacts      = (ad && typeof ad === 'object' && !Array.isArray(ad)) ? ad : {};
+  if (ad && typeof ad === 'object' && !Array.isArray(ad)) ps.addyContacts = ad;
 
   (sd.consumerKeys || []).forEach(({ id, key }) => {
     const acc = ps.accounts.find(a => a.id === id);
@@ -136,26 +137,37 @@ async function loadPopupState() {
   });
 }
 
-async function saveNotes() {
+// Every write to the shared JSON stores sends only what changed, to a
+// ?action=<store>-patch route the server applies to the file as it is now
+// (applyStatePatch() / patchMap() in proxy.php). A whole-file POST from here
+// erased what the dashboard had saved since this popup opened (an account, a
+// note, a disabled alias), and after a failed notes load it wiped notes.json.
+// A server older than these routes answers 400 and writes nothing.
+async function postStore(store, patch, what) {
   try {
-    await fetch(getProxy() + '?action=notes', {
+    const res = await fetch(getProxy() + '?action=' + store + '-patch', {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(ps.notes),
+      body: JSON.stringify(patch),
     });
-  } catch (e) { console.error('Failed to save notes:', e); }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return true;
+  } catch (e) {
+    console.error('Failed to save ' + what + ':', e);
+    showError(what[0].toUpperCase() + what.slice(1) + ' not saved: ' + e.message);
+    return false;
+  }
 }
+
+// {address: text, or null to delete}
+const saveNotes = patch => postStore('notes', patch, 'note');
 
 // Addy has no contacts API — reverse addresses are derived locally and cached
 // server-side in json/addy-contacts.json, exactly as the dashboard does it.
-async function saveAddyContacts() {
-  try {
-    await fetch(getProxy() + '?action=addy-contacts', {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(ps.addyContacts),
-    });
-  } catch (e) { console.error('Failed to save addy contacts:', e); }
+// One alias's list per call, null once empty.
+function saveAddyContacts(aliasId) {
+  const list = ps.addyContacts[aliasId];
+  return postStore('addy-contacts', { [aliasId]: list && list.length ? list : null }, 'contacts');
 }
 
 function addyBuildReverseAddress(aliasEmail, recipientEmail) {
@@ -166,31 +178,17 @@ function addyBuildReverseAddress(aliasEmail, recipientEmail) {
   return `${aliasLocal}+${recLocal}=${recDomain}@${aliasDomain}`;
 }
 
-async function saveServerState() {
-  const apiProviders = new Set(['simplelogin', 'addy', 'cloudflare']);
-  const liveDisabled = ps.aliases
-    .filter(a => a.disabled && !a.pending && !apiProviders.has(a.provider))
-    .map(({ pending: _, ...rest }) => rest);
-  const notYetLoaded = ps.disabledAliases.filter(d =>
-    !ps.aliases.some(a => a.aliasAddress === d.aliasAddress && a.accountId === d.accountId)
-  );
-  const allDisabled = [...liveDisabled, ...notYetLoaded];
-  ps.disabledAliases = allDisabled;
+// state.json: the popup never sends accounts (the dashboard manages them), only
+// ops on disabled aliases, dates, platform ids and the two account flags.
+const patchState = patch => postStore('state', patch, 'state');
 
-  const payload = {
-    accounts:          ps.accounts.map(({ consumerKey: _ck, token: _t, ovhAppKey: _k, ovhAppSecret: _s, ...rest }) => rest),
-    consumerKeys:      ps.accounts.filter(a => a.consumerKey).map(a => ({ id: a.id, key: a.consumerKey })),
-    zimbraPlatformIds: ps.zimbraPlatformIds || {},
-    zimbraPlatformId:  '',
-    disabledAliases:   allDisabled,
-    // writeState() replaces the whole file — omitting this drops every recorded
-    // "date added" the moment the popup toggles an alias.
-    aliasSeen:         ps.aliasSeen,
-  };
-  try {
-    await fetch(getProxy() + '?action=state', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(payload) });
-    _seenDirty = false;
-  } catch (e) { console.error('Failed to save state:', e); }
+// First sightings recorded by stampSeen(), one patch per refresh. Put back on
+// failure so the next flush retries them.
+async function saveSeen() {
+  const seen = _seenNew;
+  if (!Object.keys(seen).length) return;
+  _seenNew = {};
+  if (!await patchState({ seen })) _seenNew = { ...seen, ..._seenNew };
 }
 
 // ── OVH ───────────────────────────────────────────────────────────────────────
@@ -201,7 +199,7 @@ async function ovhCall(acc, method, path, body = null) {
     return await pc('ovh', method, path, body, { consumerKey, useV2, accountId: acc?.id || '', appKey: acc?.ovhAppKey || '', appSecret: acc?.ovhAppSecret || '' });
   } catch (e) {
     if (e.message && (e.message.includes('NOT_GRANTED') || e.message.includes('INVALID_CREDENTIAL') || e.message.includes('not been granted'))) {
-      if (acc) { acc.consumerKey = ''; await saveServerState(); }
+      if (acc) { acc.consumerKey = ''; await patchState({ consumerKeyUnset: [acc.id] }); }
       throw new Error('OVH session expired — please re-authenticate in Settings.');
     }
     throw e;
@@ -214,7 +212,7 @@ async function getZimbraPlatform(acc) {
   const p   = Array.isArray(raw) ? raw : (raw?.items || []);
   if (!p[0]?.id) throw new Error('No Zimbra platform found');
   ps.zimbraPlatformIds[acc.id] = p[0].id;
-  await saveServerState();
+  await patchState({ zimbraPlatformIds: { [acc.id]: p[0].id } });
   return ps.zimbraPlatformIds[acc.id];
 }
 
@@ -333,7 +331,9 @@ async function slFetchForAccount(acc) {
         slLatestActivity: a.latest_activity || null,
         createdAt:      toEpoch(a.creation_timestamp || a.creation_date),
       });
+      // SimpleLogin holds the note: one cleared there must clear here too.
       if (a.note && a.note.trim()) ps.notes[a.email] = a.note.trim();
+      else delete ps.notes[a.email];
     });
     if (items.length < 20) break;
     page++;
@@ -435,7 +435,7 @@ async function addyFetchForAccount(acc) {
       const sub    = info.subscription;
       const endsAt = info.subscription_ends_at;
       const isFree = !sub || sub === 'free' || (endsAt && new Date(endsAt) < new Date());
-      if (acc.isFree !== !!isFree) { acc.isFree = !!isFree; saveServerState(); }
+      if (acc.isFree !== !!isFree) { acc.isFree = !!isFree; patchState({ accountSet: { [acc.id]: { isFree: acc.isFree } } }); }
     }
   } catch (_) {}
   const aliases = [];
@@ -459,7 +459,9 @@ async function addyFetchForAccount(acc) {
         addyNbBlock:   a.emails_blocked   || 0,
         createdAt:     toEpoch(a.created_at),
       });
+      // Addy holds the note: one cleared there must clear here too.
       if (a.description && a.description.trim()) ps.notes[a.email] = a.description.trim();
+      else delete ps.notes[a.email];
     });
     const lastPage = data?.meta?.last_page || 1;
     if (page >= lastPage) break;
@@ -641,6 +643,7 @@ function clearCachedAliases() {
 // _accountFetch then holds one promise per account, settled once that account's
 // fresh list is in ps.aliases (or its fetch failed).
 const _accountFetch = {};
+const _cardWaiting = new Set(); // "accountId|address" of rows whose click is waiting
 let _markListsStarted;
 const _listsStarted = new Promise(r => { _markListsStarted = r; });
 
@@ -698,7 +701,7 @@ async function fetchAll() {
   updateCount();
   // Every provider failed (offline): keep the previous cache, it is still usable.
   if (ps.failedAccounts.size < ps.accounts.length) saveCachedAliases();
-  if (_seenDirty) await saveServerState();
+  await saveSeen();
 }
 
 // ── Create alias ──────────────────────────────────────────────────────────────
@@ -732,14 +735,17 @@ async function deleteAlias(alias) {
   }
   // By address, not id: disabled entries carry no id.
   ps.aliases = ps.aliases.filter(a => !(a.aliasAddress === alias.aliasAddress && a.accountId === alias.accountId));
-  if (localOnly) {
-    ps.disabledAliases = ps.disabledAliases.filter(d =>
-      !(d.aliasAddress === alias.aliasAddress && d.accountId === alias.accountId)
-    );
-    delete ps.aliasSeen[seenKey(alias)];
-    await saveServerState();
-  }
+  ps.disabledAliases = ps.disabledAliases.filter(d =>
+    !(d.aliasAddress === alias.aliasAddress && d.accountId === alias.accountId)
+  );
+  // Like the dashboard: recreating the address later must not resurrect the old
+  // date, note or Addy contacts. These were only dropped from memory before.
+  delete ps.aliasSeen[seenKey(alias)];
+  delete _seenNew[seenKey(alias)];
   delete ps.notes[alias.aliasAddress];
+  saveNotes({ [alias.aliasAddress]: null });
+  if (alias.provider === 'addy' && ps.addyContacts[alias.id]) { delete ps.addyContacts[alias.id]; saveAddyContacts(alias.id); }
+  await patchState({ disabledUnset: [{ accountId: alias.accountId, aliasAddress: alias.aliasAddress }], seenUnset: [seenKey(alias)] });
   applyFilter();
   renderList();
   updateCount();
@@ -772,7 +778,7 @@ async function toggleAlias(alias) {
           ps.disabledAliases = ps.disabledAliases.filter(d =>
             !(d.aliasAddress === alias.aliasAddress && d.accountId === alias.accountId)
           );
-          await saveServerState();
+          await patchState({ disabledUnset: [{ accountId: alias.accountId, aliasAddress: alias.aliasAddress }] });
           break;
         }
       }
@@ -788,9 +794,10 @@ async function toggleAlias(alias) {
           else if (alias.provider === 'haltman')    await haltmanDeleteAlias(alias);
           else                                      await ovhDeleteAlias(alias, acc);
           const { id: _, pending: __, ...rest } = alias;
+          const entry = { ...rest, disabled: true };
           if (!ps.disabledAliases.some(d => d.aliasAddress === rest.aliasAddress && d.accountId === rest.accountId))
-            ps.disabledAliases.push({ ...rest, disabled: true });
-          await saveServerState();
+            ps.disabledAliases.push(entry);
+          await patchState({ disabledSet: [entry] });
           break;
         }
       }
@@ -899,7 +906,7 @@ document.getElementById('contacts-list').addEventListener('click', async e => {
     const email = delBtn.dataset.contactEmail;
     const list  = ps.addyContacts[_contactsAlias.id] || [];
     ps.addyContacts[_contactsAlias.id] = list.filter(c => c.email !== email);
-    await saveAddyContacts();
+    await saveAddyContacts(_contactsAlias.id);
     renderContacts(ps.addyContacts[_contactsAlias.id]);
     return;
   }
@@ -936,7 +943,7 @@ document.getElementById('contacts-add-btn').addEventListener('click', async () =
       if (list.some(c => c.email === email)) throw new Error('This contact already exists.');
       const reverse = addyBuildReverseAddress(_contactsAlias.aliasAddress, email);
       list.push({ email, reverse });
-      await saveAddyContacts();
+      await saveAddyContacts(_contactsAlias.id);
       input.value = '';
       renderContacts(list);
       navigator.clipboard?.writeText(reverse).catch(() => {});
@@ -978,13 +985,13 @@ function toEpoch(v) {
   return isFinite(t) ? t : 0;
 }
 function dateOf(a) { return a.createdAt || ps.aliasSeen[seenKey(a)] || 0; }
-// Stamps every alias no client has seen before. Sets the dirty flag instead of
-// saving: one write at the end of the refresh is enough.
-let _seenDirty = false;
+// Stamps every alias no client has seen before. Queues the new stamps instead
+// of saving: one write at the end of the refresh is enough.
+let _seenNew = {};
 function stampSeen(list) {
   list.forEach(a => {
     const k = seenKey(a);
-    if (!ps.aliasSeen[k]) { ps.aliasSeen[k] = a.createdAt || Date.now(); _seenDirty = true; }
+    if (!ps.aliasSeen[k]) { ps.aliasSeen[k] = a.createdAt || Date.now(); _seenNew[k] = ps.aliasSeen[k]; }
   });
 }
 // A view preference, not a credential — losing it to "clear browsing data" only
@@ -1236,7 +1243,7 @@ document.getElementById('p-create-btn').addEventListener('click', async () => {
   try {
     const noteText = ps.currentTabHost ? 'Used on ' + ps.currentTabHost : '';
     const addr = await createAlias(name, noteText);
-    if (noteText) { ps.notes[addr] = noteText; saveNotes(); }
+    if (noteText) { ps.notes[addr] = noteText; saveNotes({ [addr]: noteText }); }
     showToast(addr, 3500);
     navigator.clipboard?.writeText(addr).catch(() => {});
     document.getElementById('p-name').value = '';
@@ -1306,12 +1313,18 @@ document.getElementById('p-list').addEventListener('click', async e => {
     navigator.clipboard?.writeText(shown.aliasAddress).catch(() => {}); showToast('Copied');
     return;
   }
+  if (!e.target.closest('.contacts-btn, .toggle-btn, .note-btn, .delete-btn')) return;
   // Everything else acts on the provider, so wait for this account's fresh list
   // and use that copy: the cached one can be out of date (an OVH alias
   // re-enabled from the dashboard comes back under a new id), and before
   // loadPopupState() its account has no OVH consumer key.
-  await _listsStarted;
-  await _accountFetch[account];
+  // One click per card while it waits: a second one would queue and fire too,
+  // and two SimpleLogin toggles cancel out. The dimmed row says it is coming.
+  const key = account + '|' + address;
+  if (_cardWaiting.has(key)) return;
+  _cardWaiting.add(key); item.style.opacity = '.5';
+  try { await _listsStarted; await _accountFetch[account]; }
+  finally { _cardWaiting.delete(key); item.style.opacity = ''; }
   const alias = find();
   if (!alias) return;
   if (e.target.closest('.contacts-btn')) { openContacts(alias); return; }
@@ -1363,7 +1376,7 @@ document.getElementById('p-note-save').addEventListener('click', () => {
     alias.provider === 'addy'        ? addyCall(acc, 'PATCH', '/api/v1/aliases/' + alias.id, { description: note }) :
     null;
   sync?.catch(err => showError('Note not saved on the provider: ' + err.message));
-  saveNotes();
+  saveNotes({ [alias.aliasAddress]: note || null });
 });
 
 // ── Delete confirmation ───────────────────────────────────────────────────────

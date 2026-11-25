@@ -230,6 +230,117 @@ function writeAddyContacts($data) {
     return $result;
 }
 
+// ── Per-key patches ───────────────────────────────────────────────────────────
+// The dashboard tab and the popups each hold their own copy of these stores. A
+// whole-file POST from one silently dropped whatever another had saved since it
+// loaded: a note, a disabled alias (already deleted at the provider, so it then
+// vanished for good), an account added in the dashboard. Clients now POST only
+// what changed to ?action=state-patch / notes-patch / addy-contacts-patch,
+// applied under a lock to the file as it is now.
+// New routes, not a new body on the old ones: the extensions load from disk and
+// can run ahead of the server. An older server does not know these actions,
+// hands them to the provider proxy and answers 400 — where a {"patch": …} body
+// on its ?action=notes would have been written as the whole file.
+// The old whole-file routes stay for extension builds still installed.
+
+// A write the client must hear about: 400 on a malformed patch (null), 500 when
+// the file could not be written (false). A 200 {"ok":false} went unnoticed.
+function respondWrite($ok) {
+    if ($ok === null) { http_response_code(400); echo json_encode(['error' => 'Invalid patch']); return; }
+    if (!$ok) { http_response_code(500); echo json_encode(['error' => 'Could not write to the data volume']); return; }
+    echo json_encode(['ok' => true]);
+}
+
+// notes / addy-contacts: {key: value-or-null}; null or "" removes the key.
+// $valid says what a value must be. Returns null on a malformed patch.
+function patchMap(array $map, $patch, callable $valid) {
+    if (!is_array($patch) || ($patch && array_is_list($patch))) return null;
+    foreach ($patch as $k => $v) {
+        $k = (string)$k;
+        if ($k === '') return null;
+        if ($v === null || $v === '') { unset($map[$k]); continue; }
+        if (!$valid($v)) return null;
+        $map[$k] = $v;
+    }
+    return $map;
+}
+
+// state: ops on the shared collections. Every op is optional.
+//   disabledSet       [entry]                 upsert by accountId + aliasAddress
+//   disabledUnset     [{accountId, aliasAddress}]
+//   seen              {"accountId|address": ms}  first sighting only, never moved
+//   seenUnset         ["accountId|address"]
+//   zimbraPlatformIds {accountId: platformId}
+//   consumerKeyUnset  [accountId]             OVH refused the key
+//   accountSet        {accountId: {isFree|isPremium: bool}}
+//   dropAccounts      [accountId]             everything keyed on a removed account
+function applyStatePatch(array $s, $p) {
+    if (!is_array($p) || ($p && array_is_list($p))) return null;
+    $list = fn($k) => (isset($p[$k]) && is_array($p[$k])) ? $p[$k] : [];
+    $isEntry = fn($e) => is_array($e) && is_string($e['accountId'] ?? null) && is_string($e['aliasAddress'] ?? null);
+    $entryKey = fn($e) => $e['accountId'] . '|' . $e['aliasAddress'];
+    foreach (['disabledSet', 'disabledUnset'] as $k) {
+        foreach ($list($k) as $e) if (!$isEntry($e)) return null;
+    }
+    foreach (['seenUnset', 'consumerKeyUnset', 'dropAccounts'] as $k) {
+        foreach ($list($k) as $v) if (!is_string($v)) return null;
+    }
+    foreach (['seen', 'zimbraPlatformIds', 'accountSet'] as $k) {   // maps, keyed by id
+        if ($list($k) && array_is_list($list($k))) return null;
+    }
+    $drop = array_flip($list('dropAccounts'));
+
+    $gone = [];
+    foreach (array_merge($list('disabledUnset'), $list('disabledSet')) as $e) $gone[$entryKey($e)] = true;
+    $dis = [];
+    foreach ((is_array($s['disabledAliases'] ?? null) ? $s['disabledAliases'] : []) as $d) {
+        if (!$isEntry($d)) { $dis[] = $d; continue; }
+        if (isset($gone[$entryKey($d)]) || isset($drop[$d['accountId']])) continue;
+        $dis[] = $d;
+    }
+    foreach ($list('disabledSet') as $e) $dis[] = $e;
+    $s['disabledAliases'] = $dis;
+
+    $seen = (is_array($s['aliasSeen'] ?? null) && array_values($s['aliasSeen']) !== $s['aliasSeen']) ? $s['aliasSeen'] : [];
+    foreach ($list('seen') as $k => $v) {
+        if (is_int($v) || is_float($v)) { if (!isset($seen[(string)$k])) $seen[(string)$k] = $v; }
+        else return null;
+    }
+    foreach ($list('seenUnset') as $k) unset($seen[(string)$k]);
+    foreach ($seen as $k => $_) {
+        if (isset($drop[strstr((string)$k, '|', true)])) unset($seen[$k]);
+    }
+    $s['aliasSeen'] = $seen ?: (object)[];
+
+    $zp = is_array($s['zimbraPlatformIds'] ?? null) ? $s['zimbraPlatformIds'] : [];
+    foreach ($list('zimbraPlatformIds') as $id => $pid) {
+        if (!is_string($pid) && !is_int($pid)) return null;
+        $zp[(string)$id] = $pid;
+    }
+    foreach ($drop as $id => $_) unset($zp[$id]);
+    $s['zimbraPlatformIds'] = $zp ?: (object)[];
+
+    $unsetKey = array_flip($list('consumerKeyUnset')) + $drop;
+    if (isset($s['consumerKeys']) && is_array($s['consumerKeys'])) {
+        $s['consumerKeys'] = array_values(array_filter($s['consumerKeys'],
+            fn($c) => !(is_array($c) && isset($unsetKey[(string)($c['id'] ?? '')]))));
+    }
+
+    $set = $list('accountSet');
+    if ($set && isset($s['accounts']) && is_array($s['accounts'])) {
+        foreach ($s['accounts'] as &$acc) {
+            if (!is_array($acc) || !is_string($acc['id'] ?? null)) continue;
+            $f = $set[$acc['id']] ?? null;
+            if (!is_array($f)) continue;
+            foreach (['isFree', 'isPremium'] as $flag) {
+                if (array_key_exists($flag, $f) && is_bool($f[$flag])) $acc[$flag] = $f[$flag];
+            }
+        }
+        unset($acc);
+    }
+    return $s;
+}
+
 // Resolve an account's stored token / OVH keys server-side from accountId.
 function resolveAccountSecret($accountId, $field) {
     if (!$accountId) return '';
@@ -347,7 +458,7 @@ if ($method === 'GET' && ($_GET['action'] ?? '') === 'state') {
 
 if ($method === 'POST' && ($_GET['action'] ?? '') === 'state') {
     $input = json_decode($rawInput, true);
-    if (!is_array($input)) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
+    if (!is_array($input) || ($input && array_is_list($input))) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
     unset($input['notes']);
     if (isset($input['accounts']) && is_array($input['accounts'])) {
         $credFields = ['token', 'ovhAppKey', 'ovhAppSecret'];
@@ -355,7 +466,32 @@ if ($method === 'POST' && ($_GET['action'] ?? '') === 'state') {
             return is_array($acc) ? array_diff_key($acc, array_flip($credFields)) : $acc;
         }, $input['accounts']);
     }
-    echo json_encode(['ok' => writeState($input) !== false]);
+    // Top-level merge: a key the client did not send keeps its stored value, so
+    // the dashboard's account save leaves the popups' disabled aliases and dates
+    // alone. Older builds send every key, which is the old whole-file replace.
+    respondWrite(auth_with_lock(STATE_FILE, fn() => writeState(array_merge(readState(), $input)) !== false));
+    exit();
+}
+
+// ── Patch routes (see "Per-key patches" above) ────────────────────────────────
+if ($method === 'POST' && in_array($_GET['action'] ?? '', ['state-patch', 'notes-patch', 'addy-contacts-patch'], true)) {
+    $patch = json_decode($rawInput, true);
+    $isContactList = fn($v) => is_array($v) && array_is_list($v)
+        && !array_filter($v, fn($x) => !is_array($x) || !is_string($x['email'] ?? null) || !is_string($x['reverse'] ?? null));
+    respondWrite(match ($_GET['action']) {
+        'state-patch' => auth_with_lock(STATE_FILE, function () use ($patch) {
+            $s = applyStatePatch(readState(), $patch);
+            return $s === null ? null : writeState($s) !== false;
+        }),
+        'notes-patch' => auth_with_lock(NOTES_FILE, function () use ($patch) {
+            $n = patchMap(readNotes(), $patch, fn($v) => is_string($v));
+            return $n === null ? null : writeNotes($n) !== false;
+        }),
+        'addy-contacts-patch' => auth_with_lock(ADDY_CONTACTS_FILE, function () use ($patch, $isContactList) {
+            $c = patchMap(readAddyContacts(), $patch, $isContactList);
+            return $c === null ? null : writeAddyContacts($c) !== false;
+        }),
+    });
     exit();
 }
 
@@ -371,7 +507,8 @@ if ($method === 'GET' && ($_GET['action'] ?? '') === 'notes') {
 if ($method === 'POST' && ($_GET['action'] ?? '') === 'notes') {
     $input = json_decode($rawInput, true);
     if (!is_array($input)) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
-    echo json_encode(['ok' => writeNotes($input) !== false]);
+    // Whole map: extension builds before notes-patch.
+    respondWrite(auth_with_lock(NOTES_FILE, fn() => writeNotes($input) !== false));
     exit();
 }
 
@@ -387,7 +524,8 @@ if ($method === 'GET' && ($_GET['action'] ?? '') === 'addy-contacts') {
 if ($method === 'POST' && ($_GET['action'] ?? '') === 'addy-contacts') {
     $input = json_decode($rawInput, true);
     if (!is_array($input)) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
-    echo json_encode(['ok' => writeAddyContacts($input) !== false]);
+    // Whole map: extension builds before addy-contacts-patch.
+    respondWrite(auth_with_lock(ADDY_CONTACTS_FILE, fn() => writeAddyContacts($input) !== false));
     exit();
 }
 
