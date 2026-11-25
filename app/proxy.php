@@ -377,7 +377,9 @@ if (($_GET['action'] ?? '') === 'device-tokens') {
         $in = json_decode($rawInput, true);
         if (!is_array($in)) { http_response_code(400); echo json_encode(['error' => 'Invalid JSON']); exit(); }
         if (!empty($in['revoke'])) { echo json_encode(['ok' => auth_revoke_device_token($in['revoke'])]); exit(); }
-        echo json_encode(['token' => auth_add_device_token($in['label'] ?? 'Extension')]); exit();
+        $tok = auth_add_device_token($in['label'] ?? 'Extension');
+        if ($tok === null) { http_response_code(500); echo json_encode(['error' => 'Could not save the token']); exit(); }
+        echo json_encode(['token' => $tok]); exit();
     }
 }
 
@@ -425,24 +427,33 @@ if (in_array(($_GET['action'] ?? ''), $AUTH_MGMT, true)) {
         if (!$secret || !auth_totp_verify($secret, $in['code'] ?? '')) {
             http_response_code(400); echo json_encode(['error' => 'Invalid code']); exit();
         }
-        $a = auth_read();
         $codes = auth_generate_backup_codes(8);
-        $a['user']['totpSecret']  = $secret;
-        $a['user']['totpEnabled'] = true;
-        $a['user']['backupCodes'] = array_map('auth_hash_backup_code', $codes);
-        auth_write($a);
+        // Under the auth-store lock, like every read-modify-write of it (see
+        // auth_add_device_token()).
+        $ok = auth_with_lock(AUTH_FILE, function () use ($secret, $codes) {
+            $a = auth_read();
+            $a['user']['totpSecret']  = $secret;
+            $a['user']['totpEnabled'] = true;
+            $a['user']['backupCodes'] = array_map('auth_hash_backup_code', $codes);
+            return auth_write($a) !== false;
+        });
+        if (!$ok) { http_response_code(500); echo json_encode(['error' => 'Could not save TOTP']); exit(); }
         unset($_SESSION['totp_pending']);
         echo json_encode(['ok' => true, 'backupCodes' => $codes]); exit();
     }
     if ($action === 'totp-disable') {
-        if (!auth_methods()['passkey']) {
-            http_response_code(400); echo json_encode(['error' => 'Add a passkey before disabling TOTP.']); exit();
-        }
-        $a = auth_read();
-        $a['user']['totpEnabled'] = false;
-        $a['user']['totpSecret']  = '';
-        $a['user']['backupCodes'] = [];
-        auth_write($a);
+        // The passkey check sits inside the lock: checked outside, a passkey
+        // removal landing in between could leave the account with no factor.
+        $r = auth_with_lock(AUTH_FILE, function () {
+            $a = auth_read();
+            if (empty($a['user']['passkeys'])) return 'no-passkey';
+            $a['user']['totpEnabled'] = false;
+            $a['user']['totpSecret']  = '';
+            $a['user']['backupCodes'] = [];
+            return auth_write($a) !== false;
+        });
+        if ($r === 'no-passkey') { http_response_code(400); echo json_encode(['error' => 'Add a passkey before disabling TOTP.']); exit(); }
+        if (!$r) { http_response_code(500); echo json_encode(['error' => 'Could not save']); exit(); }
         echo json_encode(['ok' => true]); exit();
     }
 }

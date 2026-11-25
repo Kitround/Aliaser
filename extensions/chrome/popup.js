@@ -160,10 +160,12 @@ async function postStore(store, patch, what) {
 }
 
 // An Aliaser server older than the -patch routes hands them to the provider
-// proxy, which answers 400 "Invalid request fields": say what to do about it.
+// proxy, which answers 400 "Invalid request fields" (or "Invalid JSON input"
+// for the empty probe body): say what to do about it. A current server's own
+// refusal reads "Invalid patch".
 async function storeError(res) {
   const body = await res.json().catch(() => null);
-  return new Error(res.status === 400 && body?.error === 'Invalid request fields'
+  return new Error(res.status === 400 && ['Invalid request fields', 'Invalid JSON input'].includes(body?.error)
     ? 'the Aliaser server is older than this extension, redeploy it'
     : 'HTTP ' + res.status);
 }

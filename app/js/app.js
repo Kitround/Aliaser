@@ -1604,13 +1604,15 @@ document.getElementById('btn-create-token').addEventListener('click',async()=>{
   const btn=document.getElementById('btn-create-token');btn.disabled=true;
   try{
     const res=_checkAuth(await fetch(PROXY+'?action=device-tokens',{method:'POST',headers:_writeHeaders(),body:JSON.stringify({label})}));
-    const data=await res.json();
+    const data=await res.json().catch(()=>({}));
+    // A refused or failed save used to reveal an empty box, as if it worked.
+    if(!res.ok||!data.token)throw new Error(data.error||'HTTP '+res.status);
     const box=document.getElementById('device-token-reveal');
-    box.style.display='block';box.textContent=data.token||'';box.style.cursor='pointer';box.title='Click to copy';
+    box.style.display='block';box.textContent=data.token;box.style.cursor='pointer';box.title='Click to copy';
     box.onclick=()=>copyText(data.token,box);
     document.getElementById('device-token-label').value='';
     loadDeviceTokens();
-  }catch(e){showError('Failed to create token');}
+  }catch(e){showError('Failed to create token: '+e.message);}
   finally{btn.disabled=false;}
 });
 

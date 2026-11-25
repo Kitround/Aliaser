@@ -43,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_GET['action'] ?? '', ['p
     $inCsrf = is_string($in['csrf'] ?? null) ? $in['csrf'] : '';
     if (!hash_equals($_SESSION['form_csrf'] ?? '', $inCsrf)) { http_response_code(403); echo json_encode(['error' => 'CSRF']); exit; }
     if (($_GET['action']) === 'passkey-login-options') { echo json_encode(webauthn_assertion_options()); exit; }
+    if (!auth_take_attempt()) { http_response_code(429); echo json_encode(['error' => 'Too many attempts']); exit; }
     $res = webauthn_assertion_verify(is_array($in['response'] ?? null) ? $in['response'] : []);
     if ($res === true) {
         auth_reset_fails();
@@ -50,7 +51,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_GET['action'] ?? '', ['p
         auth_log('login_ok', ['method' => 'passkey']);
         echo json_encode(['ok' => true, 'redirect' => './']); exit;
     }
-    auth_record_fail();
     auth_log('passkey_fail');
     http_response_code(400); echo json_encode(['error' => is_string($res) ? $res : 'Verification failed']); exit;
 }
@@ -84,32 +84,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         elseif (strlen($pw) < 10)         $error = 'Password must be at least 10 characters.';
         elseif ($pw !== $pw2)             $error = 'Passwords do not match.';
         else {
-            $secret = auth_totp_new_secret();
-            auth_write([
-                'user' => [
-                    'username'     => $username,
-                    'passwordHash' => auth_hash_password($pw),
-                    'totpSecret'   => $secret,
-                    'totpEnabled'  => false,
-                    'backupCodes'  => [],
-                ],
-                'deviceTokens' => [],
-            ]);
-            $_SESSION['enroll'] = $username;
-            $stage = 'enroll';
+            // Re-checked under the lock: two first-run setups racing would both
+            // see "no user" and the second would silently replace the first.
+            $created = auth_with_lock(AUTH_FILE, function () use ($username, $pw) {
+                if (auth_user_exists()) return false;
+                auth_write([
+                    'user' => [
+                        'username'     => $username,
+                        'passwordHash' => auth_hash_password($pw),
+                        'totpSecret'   => auth_totp_new_secret(),
+                        'totpEnabled'  => false,
+                        'backupCodes'  => [],
+                    ],
+                    'deviceTokens' => [],
+                ]);
+                return true;
+            });
+            if ($created) {
+                $_SESSION['enroll'] = $username;
+                $stage = 'enroll';
+            } else {
+                $error = 'An account already exists — sign in instead.';
+                $stage = 'login';
+            }
         }
-        if ($error) $stage = 'setup';
+        if ($error && $stage !== 'login') $stage = 'setup';
     } elseif ($action === 'enroll' && !empty($_SESSION['enroll'])) {
-        $a = auth_read();
-        $secret = $a['user']['totpSecret'] ?? '';
         $code = $_POST['code'] ?? '';
-        if ($secret && auth_totp_verify($secret, $code)) {
-            $codes = auth_generate_backup_codes(8);
+        $codes = auth_generate_backup_codes(8);
+        $username = auth_with_lock(AUTH_FILE, function () use ($code, $codes) {
+            $a = auth_read();
+            $secret = $a['user']['totpSecret'] ?? '';
+            $step = $secret ? auth_totp_match_step($secret, $code) : null;
+            if ($step === null) return null;
             $a['user']['totpEnabled'] = true;
+            $a['user']['totpLastStep'] = $step;     // the enrolment code is spent too
             $a['user']['backupCodes'] = array_map('auth_hash_backup_code', $codes);
             auth_write($a);
+            return $a['user']['username'];
+        });
+        if ($username !== null) {
             unset($_SESSION['enroll']);
-            auth_establish_session($a['user']['username']);
+            auth_reset_fails();                     // enrolment ends in a full sign-in
+            auth_establish_session($username);
             $backupCodes = $codes;          // shown once
             $stage = 'backup';
         } else {
@@ -117,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stage = 'enroll';
         }
     } elseif ($action === 'login' && $hasUser) {
-        if (auth_is_locked()) {
+        if (!auth_take_attempt()) {
             http_response_code(429);
             auth_log('lockout', ['stage' => 'login']);
             $error = 'Too many attempts. Try again in ' . ceil(auth_lock_remaining() / 60) . ' min.';
@@ -125,7 +142,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $username = trim($_POST['username'] ?? '');
             $pw = (string)($_POST['password'] ?? '');
             if ($username === auth_username() && auth_verify_password($pw)) {
-                auth_reset_fails();
+                // No auth_reset_fails() here: a correct password is half a
+                // sign-in. Resetting at this point let anyone holding the
+                // password alternate it with TOTP guesses and never lock out.
                 if (!$configured) {                 // enrolment was interrupted
                     $_SESSION['enroll'] = $username;
                     $stage = 'enroll';
@@ -138,20 +157,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stage = 'login';
                 }
             } else {
-                auth_record_fail();
-                auth_log('login_fail');
+                auth_log('login_fail');             // counted by auth_take_attempt()
                 $error = 'Invalid username or password.';
                 $stage = 'login';
             }
         }
     } elseif ($action === 'twofa' && !empty($_SESSION['pending_user'])) {
-        if (auth_is_locked()) {
+        if (!auth_take_attempt()) {
             http_response_code(429);
             auth_log('lockout', ['stage' => '2fa']);
             $error = 'Too many attempts. Try again in ' . ceil(auth_lock_remaining() / 60) . ' min.';
             $stage = 'twofa';
         } elseif (auth_verify_second_factor($_POST['code'] ?? '')) {
-            auth_reset_fails();
+            auth_reset_fails();                     // the only full sign-in by password
             $user = $_SESSION['pending_user'];
             unset($_SESSION['pending_user']);
             auth_establish_session($user);
@@ -159,8 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: ./');
             exit;
         } else {
-            auth_record_fail();
-            auth_log('2fa_fail');
+            auth_log('2fa_fail');                   // counted by auth_take_attempt()
             $error = 'Invalid code.';
             $stage = 'twofa';
         }

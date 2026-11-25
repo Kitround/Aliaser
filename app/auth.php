@@ -275,26 +275,35 @@ function auth_verify_device_token($token) {
     }
     return false;
 }
+// Every read-modify-write of the auth store below runs under the AUTH_FILE lock,
+// like the sign-in paths. Unlocked, a device-token change racing a passkey or
+// TOTP sign-in lost one of the two writes: the new token vanished, or the
+// sign counter / totpLastStep went back and reopened a replay window.
+// auth_with_lock() is not re-entrant: never call these from inside it.
 function auth_add_device_token($label) {
     $token = bin2hex(random_bytes(32));
-    $a = auth_read();
-    $a['deviceTokens'][] = [
-        'id'      => bin2hex(random_bytes(8)),
-        'label'   => mb_substr((string)$label, 0, 60),
-        'hash'    => hash('sha256', $token),
-        'created' => time(),
-    ];
-    auth_write($a);
-    return $token; // shown once, never recoverable
+    $ok = auth_with_lock(AUTH_FILE, function () use ($token, $label) {
+        $a = auth_read();
+        $a['deviceTokens'][] = [
+            'id'      => bin2hex(random_bytes(8)),
+            'label'   => mb_substr((string)$label, 0, 60),
+            'hash'    => hash('sha256', $token),
+            'created' => time(),
+        ];
+        return auth_write($a) !== false;
+    });
+    return $ok ? $token : null; // shown once, never recoverable
 }
 function auth_list_device_tokens() {
     $a = auth_read();
     return array_map(fn($d) => ['id' => $d['id'] ?? '', 'label' => $d['label'] ?? '', 'created' => $d['created'] ?? 0], $a['deviceTokens']);
 }
 function auth_revoke_device_token($id) {
-    $a = auth_read();
-    $a['deviceTokens'] = array_values(array_filter($a['deviceTokens'], fn($d) => ($d['id'] ?? '') !== $id));
-    return auth_write($a) !== false;
+    return auth_with_lock(AUTH_FILE, function () use ($id) {
+        $a = auth_read();
+        $a['deviceTokens'] = array_values(array_filter($a['deviceTokens'], fn($d) => ($d['id'] ?? '') !== $id));
+        return auth_write($a) !== false;
+    });
 }
 
 // ── WebAuthn / passkeys (pure PHP, ES256 only) ────────────────────────────────
@@ -390,15 +399,19 @@ function auth_get_passkey($credIdB64) {
     return null;
 }
 function auth_remove_passkey($credIdB64) {
-    $a = auth_read();
-    if (empty($a['user'])) return false;
-    $before = count($a['user']['passkeys'] ?? []);
-    $a['user']['passkeys'] = array_values(array_filter($a['user']['passkeys'] ?? [],
-        fn($p) => ($p['id'] ?? '') !== $credIdB64));
-    // Never let the account end up with zero factors.
-    if (empty($a['user']['passkeys']) && empty($a['user']['totpEnabled'])) return 'last';
-    auth_write($a);
-    return count($a['user']['passkeys']) < $before;
+    // Locked so the "never zero factors" check and the write see the same
+    // store a concurrent totp-disable does.
+    return auth_with_lock(AUTH_FILE, function () use ($credIdB64) {
+        $a = auth_read();
+        if (empty($a['user'])) return false;
+        $before = count($a['user']['passkeys'] ?? []);
+        $a['user']['passkeys'] = array_values(array_filter($a['user']['passkeys'] ?? [],
+            fn($p) => ($p['id'] ?? '') !== $credIdB64));
+        // Never let the account end up with zero factors.
+        if (empty($a['user']['passkeys']) && empty($a['user']['totpEnabled'])) return 'last';
+        auth_write($a);
+        return count($a['user']['passkeys']) < $before;
+    });
 }
 
 // Registration: returns options for navigator.credentials.create (challenge in session).
@@ -456,19 +469,21 @@ function webauthn_register_verify($resp, $label) {
         return 'Bad attestation';
     }
 
-    $a = auth_read();
-    if (empty($a['user'])) return 'No user';
-    if (!isset($a['user']['passkeys'])) $a['user']['passkeys'] = [];
-    $a['user']['passkeys'][] = [
-        'id'        => b64url_encode($credId),
-        'publicKey' => $pem,
-        'signCount' => $signCount,
-        'label'     => mb_substr((string)$label, 0, 60) ?: 'Passkey',
-        'created'   => time(),
-    ];
-    auth_write($a);
-    unset($_SESSION['webauthn_chal']);
-    return true;
+    $res = auth_with_lock(AUTH_FILE, function () use ($credId, $pem, $signCount, $label) {
+        $a = auth_read();
+        if (empty($a['user'])) return 'No user';
+        if (!isset($a['user']['passkeys'])) $a['user']['passkeys'] = [];
+        $a['user']['passkeys'][] = [
+            'id'        => b64url_encode($credId),
+            'publicKey' => $pem,
+            'signCount' => $signCount,
+            'label'     => mb_substr((string)$label, 0, 60) ?: 'Passkey',
+            'created'   => time(),
+        ];
+        return auth_write($a) !== false ? true : 'Could not save the passkey';
+    });
+    if ($res === true) unset($_SESSION['webauthn_chal']);
+    return $res;
 }
 
 // Assertion (login): options for navigator.credentials.get.
@@ -557,11 +572,19 @@ function auth_lock_remaining() {
     return $e ? max(0, ($e['until'] ?? 0) - time()) : 0;
 }
 function auth_is_locked() { return auth_lock_remaining() > 0; }
-function auth_record_fail() {
-    auth_with_lock(THROTTLE_FILE, function () {
+// Spend one attempt BEFORE checking a password, TOTP code or passkey: false
+// when locked out. Every attempt counts as a failure until auth_reset_fails()
+// clears the counter on a completed sign-in.
+// It used to be "if (!auth_is_locked()) … verify … auth_record_fail()": the
+// check and the count were apart, so N parallel requests all passed the check
+// before the first failure was recorded — N guesses per lockout window instead
+// of AUTH_MAX_FAILS. Check and count are now one step under the lock.
+function auth_take_attempt() {
+    return auth_with_lock(THROTTLE_FILE, function () {
         $t = auth_throttle_read();
         $k = auth_throttle_key();
         $e = $t[$k] ?? ['fails' => 0, 'until' => 0];
+        if (($e['until'] ?? 0) > time()) return false;
         $e['fails'] = ($e['fails'] ?? 0) + 1;
         if ($e['fails'] >= AUTH_MAX_FAILS) { $e['until'] = time() + AUTH_LOCK_SECONDS; $e['fails'] = 0; }
         // Drop entries whose lockout expired long ago so the file cannot grow
@@ -572,6 +595,7 @@ function auth_record_fail() {
         }
         $t[$k] = $e;
         auth_throttle_write($t);
+        return true;
     });
 }
 function auth_reset_fails() {
