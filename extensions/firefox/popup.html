@@ -171,6 +171,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
 .p-confirm-btn:hover{background:var(--surface3)}
 .p-confirm-btn.danger{background:transparent;border-color:rgba(224,80,80,.3);color:var(--red)}
 .p-confirm-btn.danger:hover{background:var(--red-soft)}
+.p-confirm-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.p-confirm-btn.primary:hover{background:var(--accent-hover)}
+.p-note-input{height:auto;padding:8px 10px;resize:none;line-height:1.4}
 </style>
 </head>
 <body>
@@ -303,6 +306,19 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);display:flex
     <div class="p-confirm-actions">
       <button class="p-confirm-btn" id="p-confirm-cancel">Cancel</button>
       <button class="p-confirm-btn danger" id="p-confirm-delete">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit note -->
+<div class="p-confirm" id="p-note">
+  <div class="p-confirm-box">
+    <div class="p-confirm-title">Edit note</div>
+    <div class="p-confirm-alias" id="p-note-alias"></div>
+    <textarea class="p-input p-note-input" id="p-note-input" rows="3" placeholder="Add a note…"></textarea>
+    <div class="p-confirm-actions">
+      <button class="p-confirm-btn" id="p-note-cancel">Cancel</button>
+      <button class="p-confirm-btn primary" id="p-note-save">Save</button>
     </div>
   </div>
 </div>

@@ -157,3 +157,6 @@ html,body{width:420px;height:580px;overflow:hidden;display:flex;flex-direction:c
 .p-confirm-btn:hover{background:var(--surface3)}
 .p-confirm-btn.danger{background:transparent;border-color:rgba(224,80,80,.3);color:var(--red)}
 .p-confirm-btn.danger:hover{background:var(--red-soft)}
+.p-confirm-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.p-confirm-btn.primary:hover{background:var(--accent-hover)}
+.p-note-input{height:auto;padding:8px 10px;resize:none;line-height:1.4}

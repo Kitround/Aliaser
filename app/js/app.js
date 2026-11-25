@@ -658,7 +658,8 @@ async function haltmanDeleteAlias(alias){
 // The HTTP status (appended as "(HTTP nnn)" by proxyCall) tells us the source.
 function describeProviderError(e){
   const msg=(e&&e.message)||String(e||'');
-  const m=msg.match(/\(HTTP (\d+)\)/);
+  // "msg (HTTP 502)", or a bare "HTTP 502" when the body carried no message.
+  const m=msg.match(/HTTP (\d{3})\)?$/);
   const code=m?parseInt(m[1],10):0;
   // Already-friendly messages thrown upstream (e.g. OVH session expired)
   if(/re-authenticate|session expired/i.test(msg))return msg;
@@ -2334,6 +2335,10 @@ renderSortMenu();
 // ── Init ──────────────────────────────────────────────────────────────────────
 // Enable :active states on iOS Safari (requires at least one touchstart listener on document)
 document.addEventListener('touchstart',()=>{},{passive:true});
+
+// Settings footer: the ?v= of the app.js that is actually running, so a stale
+// deploy or a cached copy shows up at a glance.
+document.getElementById('app-version').textContent='Aliaser v'+(new URL(document.currentScript.src).searchParams.get('v')||'?');
 
 // Paint instantly: show the last cached alias list if we have one (stale-while-
 // revalidate), otherwise the loading spinner. Avoids a blank page on slow/offline

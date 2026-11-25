@@ -582,7 +582,8 @@ async function haltmanDeleteAlias(alias) {
 // Turn a raw provider/proxy error into a human-readable explanation.
 function describeProviderError(e) {
   const msg = (e && e.message) || String(e || '');
-  const m = msg.match(/\(HTTP (\d+)\)/);
+  // "msg (HTTP 502)", or a bare "HTTP 502" when the body carried no message.
+  const m = msg.match(/HTTP (\d{3})\)?$/);
   const code = m ? parseInt(m[1], 10) : 0;
   if (/re-authenticate|session expired/i.test(msg)) return msg;
   if (code >= 500 || (code === 0 && /network error/i.test(msg)))
@@ -1041,6 +1042,12 @@ function renderList() {
         </button>
         ${btnContacts}
         ${btnToggle}
+        <button class="p-btn note-btn" data-id="${esc(a.id)}" title="Edit note">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+        </button>
         <button class="p-btn danger delete-btn" data-id="${esc(a.id)}" title="Delete">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <polyline points="3 6 5 6 21 6"/>
@@ -1285,10 +1292,51 @@ document.getElementById('p-list').addEventListener('click', e => {
     toggleAlias(alias).catch(err => showError('Toggle failed: ' + err.message));
     return;
   }
+  if (e.target.closest('.note-btn')) { openNote(alias); return; }
   if (e.target.closest('.delete-btn')) {
     askDelete(alias);
     return;
   }
+});
+
+// ── Edit note ─────────────────────────────────────────────────────────────────
+// Same storage as the dashboard: SL and Addy keep the note on the provider,
+// every provider also keeps it in notes.json.
+let _noteAlias = null;
+function openNote(alias) {
+  _noteAlias = alias;
+  document.getElementById('p-note-alias').textContent = alias.aliasAddress;
+  const input = document.getElementById('p-note-input');
+  input.value = ps.notes[alias.aliasAddress] || '';
+  document.getElementById('p-note').classList.add('open');
+  input.focus();
+}
+function closeNote() {
+  _noteAlias = null;
+  document.getElementById('p-note').classList.remove('open');
+}
+document.getElementById('p-note-cancel').addEventListener('click', closeNote);
+document.getElementById('p-note').addEventListener('click', e => {
+  if (e.target === document.getElementById('p-note')) closeNote();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && _noteAlias) closeNote();
+});
+document.getElementById('p-note-save').addEventListener('click', () => {
+  const alias = _noteAlias;
+  if (!alias) return;
+  const note = document.getElementById('p-note-input').value.trim();
+  closeNote();
+  if (note) ps.notes[alias.aliasAddress] = note;
+  else delete ps.notes[alias.aliasAddress];
+  applyFilter(); renderList(); saveCachedAliases();
+  const acc = accForAlias(alias);
+  const sync =
+    alias.provider === 'simplelogin' ? slCall(acc, 'PATCH', '/api/aliases/' + alias.id, { note }) :
+    alias.provider === 'addy'        ? addyCall(acc, 'PATCH', '/api/v1/aliases/' + alias.id, { description: note }) :
+    null;
+  sync?.catch(err => showError('Note not saved on the provider: ' + err.message));
+  saveNotes();
 });
 
 // ── Delete confirmation ───────────────────────────────────────────────────────
